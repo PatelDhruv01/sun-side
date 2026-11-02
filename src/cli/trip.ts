@@ -267,7 +267,7 @@ function printDay(context: TripContext, plan: DayPlan, pick: number, vehicle: Ve
 function printVerdict(d: Decision, stats: TripStats, clock: Clock, weather?: TripWeather) {
   const { headline, reasons, tips, heat } = explain(d, stats, (t) => hhmm(t, clock), weather);
   console.log(`\nVERDICT  ${headline}`);
-  for (const line of [...reasons, ...tips, heat]) console.log(`         ${line}`);
+  for (const line of [...reasons, ...tips.map((tip) => tip.text), heat]) console.log(`         ${line}`);
 }
 
 /** Does the answer hold on the other routes, and if the bus leaves a little early or late? */

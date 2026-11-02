@@ -1,0 +1,11 @@
+{
+  "name": "Sun Side",
+  "short_name": "Sun Side",
+  "description": "Which side of the bus or car to sit on to stay out of the sun.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f2",
+  "theme_color": "#f7f6f2",
+  "icons": [{ "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

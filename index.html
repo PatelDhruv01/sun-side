@@ -2,14 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0c0b" media="(prefers-color-scheme: dark)" />
+    <title>Sun Side · Sit on the shady side</title>
     <meta
       name="description"
-      content="Which side of the bus or car to sit on to stay out of the sun, worked out minute by minute along your real route."
+      content="Which side of the bus or car should you sit on to stay out of the sun? Sun Side works it out minute by minute along your real route, with the sun's path and the weather forecast."
     />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☀️</text></svg>" />
-    <title>Sun Side · which side to sit on</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Sun Side · Sit on the shady side" />
+    <meta
+      property="og:description"
+      content="Which side of the bus or car stays out of the sun, worked out minute by minute along your real route."
+    />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Apply a light or dark pick before the first paint (see src/web/theme.ts).
+      try {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

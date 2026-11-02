@@ -1,6 +1,10 @@
+import { ArrowRight, ArrowUpDown, Bus, Car, CircleDot, LoaderCircle, MapPin, Plus, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { lerp } from '../engine/geo.ts';
 import type { Vehicle } from '../engine/timing.ts';
-import { emptyField, PlaceInput, type PlaceField } from './PlaceInput.tsx';
+import { emptyField, FIELD_INPUT, FIELD_LABEL, PlaceInput, type PlaceField } from './PlaceInput.tsx';
+import { dateInput, timeInput } from './time.ts';
+import { CARD } from './ui.tsx';
 
 export interface TripInput {
   from: PlaceField;
@@ -17,51 +21,35 @@ export interface TripInput {
   vehicle: Vehicle;
 }
 
+/** A ready-made trip to try. */
+export interface Example {
+  label: string;
+  input: () => TripInput;
+}
+
 interface Props {
   value: TripInput;
   onChange: (value: TripInput) => void;
   onSubmit: () => void;
-  onExample: () => void;
   busy: boolean;
+  /** Quick-start trips under the button. */
+  examples?: Example[];
+  onExample?: (input: TripInput) => void;
 }
 
-const LABEL = 'mb-1 block text-sm font-medium text-ink-2';
-const INPUT = 'w-full rounded-lg border border-hairline bg-page px-3 py-2.5 text-base outline-none focus:border-ink-2';
-const LINK = 'underline decoration-axis underline-offset-4 hover:text-ink';
+const DAY = 86_400_000;
 
-/** Two or more choices as one segmented control. */
-function Segmented<T extends string>({ legend, name, options, value, onChange }: {
-  legend: string;
-  name: string;
-  options: [T, string][];
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <fieldset>
-      <legend className={LABEL}>{legend}</legend>
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-page p-1">
-        {options.map(([option, label]) => (
-          <label
-            key={option}
-            className={`cursor-pointer rounded-md py-2 text-center text-sm font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ink-2 ${
-              value === option ? 'bg-surface text-ink shadow-sm' : 'text-ink-2'
-            }`}
-          >
-            <input type="radio" name={name} value={option} checked={value === option} onChange={() => onChange(option)} className="sr-only" />
-            {label}
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) {
+export function TripForm({ value, onChange, onSubmit, busy, examples, onExample }: Props) {
   const set = (patch: Partial<TripInput>) => onChange({ ...value, ...patch });
   const middle = value.from.place && value.to.place ? lerp(value.from.place.position, value.to.place.position, 0.5) : undefined;
   const ready =
     value.from.text.trim() !== '' && value.to.text.trim() !== '' && value.date !== '' && (value.when === 'day' || value.time !== '');
+  const today = dateInput(Date.now());
+  const tomorrow = dateInput(Date.now() + DAY);
+  const now = () => {
+    const soon = Math.ceil(Date.now() / 300_000) * 300_000; // the next five minutes
+    set({ date: dateInput(soon), time: timeInput(soon) });
+  };
 
   return (
     <form
@@ -69,77 +57,84 @@ export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) 
         e.preventDefault();
         if (ready && !busy) onSubmit();
       }}
-      className="rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-ink/5"
+      className={`${CARD} p-4 sm:p-6`}
     >
-      <div className="space-y-3">
-        <PlaceInput label="From" field={value.from} onChange={(from) => set({ from })} placeholder="e.g. Ahmedabad" />
+      <Segmented
+        legend="When are you leaving?"
+        hideLegend
+        name="when"
+        options={[
+          { value: 'at', label: 'At a set time' },
+          { value: 'day', label: 'Not sure yet' },
+        ]}
+        value={value.when}
+        onChange={(when) => set({ when })}
+      />
+
+      <div className="mt-5 space-y-3">
+        <PlaceInput label="From" icon={<CircleDot className="size-4" />} field={value.from} onChange={(from) => set({ from })} placeholder="e.g. Ahmedabad" />
         {value.vias.map((via, i) => (
-          <div key={i} className="flex items-end gap-2">
-            <div className="min-w-0 flex-1">
-              <PlaceInput
-                label="Via"
-                field={via}
-                near={middle}
-                placeholder="a town the bus goes through"
-                onChange={(field) => set({ vias: value.vias.map((v, j) => (j === i ? field : v)) })}
-              />
-            </div>
-            <button
-              type="button"
-              aria-label="Remove this town"
-              onClick={() => set({ vias: value.vias.filter((_, j) => j !== i) })}
-              className="mb-0.5 rounded-lg px-3 py-2.5 text-ink-2 hover:bg-page hover:text-ink"
-            >
-              ✕
-            </button>
-          </div>
+          <PlaceInput
+            key={i}
+            label="Via"
+            icon={<MapPin className="size-4" />}
+            field={via}
+            near={middle}
+            placeholder="A town the bus goes through"
+            onChange={(field) => set({ vias: value.vias.map((v, j) => (j === i ? field : v)) })}
+            action={<LabelButton onClick={() => set({ vias: value.vias.filter((_, j) => j !== i) })}>Remove</LabelButton>}
+          />
         ))}
-        <PlaceInput label="To" field={value.to} onChange={(to) => set({ to })} placeholder="e.g. Himatnagar" />
-        <button type="button" onClick={() => set({ vias: [...value.vias, emptyField] })} className={`text-sm font-medium text-ink-2 ${LINK}`}>
-          + Add a town the bus goes through
+        <PlaceInput
+          label="To"
+          icon={<MapPin className="size-4" />}
+          field={value.to}
+          onChange={(to) => set({ to })}
+          placeholder="e.g. Himatnagar"
+          action={
+            <LabelButton icon={ArrowUpDown} onClick={() => set({ from: value.to, to: value.from, vias: [...value.vias].reverse() })}>
+              Swap
+            </LabelButton>
+          }
+        />
+        <button
+          type="button"
+          onClick={() => set({ vias: [...value.vias, emptyField] })}
+          className="inline-flex items-center gap-1.5 rounded-lg py-1 text-sm font-medium text-ink-2 hover:text-ink"
+        >
+          <Plus aria-hidden className="size-4" />
+          Add a town the bus goes through
         </button>
       </div>
 
-      <div className="mt-5">
-        <Segmented
-          legend="When"
-          name="when"
-          options={[
-            ['at', 'At a set time'],
-            ['day', 'Not sure yet'],
-          ]}
-          value={value.when}
-          onChange={(when) => set({ when })}
-        />
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="trip-date" className={LABEL}>
-            Date
-          </label>
-          <input id="trip-date" type="date" required value={value.date} onChange={(e) => set({ date: e.target.value })} className={INPUT} />
-        </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Field
+          id="trip-date"
+          label="Date"
+          action={
+            <span className="flex gap-0.5">
+              <LabelButton pressed={value.date === today} onClick={() => set({ date: today })}>
+                Today
+              </LabelButton>
+              <LabelButton pressed={value.date === tomorrow} onClick={() => set({ date: tomorrow })}>
+                Tomorrow
+              </LabelButton>
+            </span>
+          }
+        >
+          <input id="trip-date" type="date" required value={value.date} onChange={(e) => set({ date: e.target.value })} className={FIELD_INPUT} />
+        </Field>
         {value.when === 'at' ? (
           <>
-            <div>
-              <label htmlFor="trip-time" className={LABEL}>
-                Leaves at
-              </label>
-              <input id="trip-time" type="time" required value={value.time} onChange={(e) => set({ time: e.target.value })} className={INPUT} />
-            </div>
-            <div className="col-span-2">
-              <label htmlFor="trip-arrive" className={LABEL}>
-                Arrives at <span className="font-normal text-muted">optional, from your ticket</span>
-              </label>
-              <input id="trip-arrive" type="time" value={value.arrive} onChange={(e) => set({ arrive: e.target.value })} className={INPUT} />
-            </div>
+            <Field id="trip-time" label="Leaves at" action={<LabelButton onClick={now}>Now</LabelButton>}>
+              <input id="trip-time" type="time" required value={value.time} onChange={(e) => set({ time: e.target.value })} className={FIELD_INPUT} />
+            </Field>
+            <Field id="trip-arrive" label="Arrives at" hint="optional, from your ticket" className="col-span-2">
+              <input id="trip-arrive" type="time" value={value.arrive} onChange={(e) => set({ arrive: e.target.value })} className={FIELD_INPUT} />
+            </Field>
           </>
         ) : (
-          <div>
-            <label htmlFor="trip-hours" className={LABEL}>
-              Takes, hours <span className="font-normal text-muted">optional</span>
-            </label>
+          <Field id="trip-hours" label="Takes" hint="hours, optional">
             <input
               id="trip-hours"
               type="number"
@@ -149,19 +144,19 @@ export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) 
               placeholder="e.g. 2.5"
               value={value.hours}
               onChange={(e) => set({ hours: e.target.value })}
-              className={INPUT}
+              className={FIELD_INPUT}
             />
-          </div>
+          </Field>
         )}
       </div>
 
-      <div className="mt-5">
+      <div className="mt-4">
         <Segmented
           legend="Going by"
           name="vehicle"
           options={[
-            ['bus', 'Bus'],
-            ['car', 'Car'],
+            { value: 'bus', label: 'Bus', icon: Bus },
+            { value: 'car', label: 'Car', icon: Car },
           ]}
           value={value.vehicle}
           onChange={(vehicle) => set({ vehicle })}
@@ -171,16 +166,105 @@ export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) 
       <button
         type="submit"
         disabled={!ready || busy}
-        className="mt-6 w-full rounded-xl bg-ink px-4 py-3 text-base font-semibold text-surface transition-opacity disabled:opacity-50"
+        className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink text-base font-semibold text-surface shadow-sm transition-colors hover:bg-ink/85 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:opacity-50"
       >
-        {busy ? 'Working it out…' : 'Find the shady side'}
+        {busy ? (
+          <>
+            <LoaderCircle aria-hidden className="size-5 animate-spin" />
+            Working it out…
+          </>
+        ) : (
+          <>
+            {value.when === 'day' ? 'Show the whole day' : 'Find the shady side'}
+            <ArrowRight aria-hidden className="size-5" />
+          </>
+        )}
       </button>
-      <p className="mt-3 text-center text-sm text-ink-2">
-        or{' '}
-        <button type="button" onClick={onExample} className={LINK}>
-          try Ahmedabad → Himatnagar
-        </button>
-      </p>
+
+      {examples && onExample && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted">Try</span>
+          {examples.map((example) => (
+            <button
+              key={example.label}
+              type="button"
+              onClick={() => onExample(example.input())}
+              className="rounded-full bg-ink/[0.045] px-3 py-1.5 text-xs font-medium text-ink-2 transition-colors hover:bg-ink/[0.09] hover:text-ink"
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
+      )}
     </form>
+  );
+}
+
+/** A label line with an optional hint and a small control on the right, over one input. */
+function Field({ id, label, hint, action, className = '', children }: {
+  id: string;
+  label: string;
+  hint?: string;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <div className="flex items-end justify-between gap-2">
+        <label htmlFor={id} className={FIELD_LABEL}>
+          {label}
+          {hint && <span className="font-normal text-muted"> · {hint}</span>}
+        </label>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function LabelButton({ onClick, pressed, icon: Icon, children }: { onClick: () => void; pressed?: boolean; icon?: LucideIcon; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      className={`mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition-colors ${
+        pressed ? 'bg-ink text-surface' : 'text-ink-2 hover:bg-ink/[0.06] hover:text-ink'
+      }`}
+    >
+      {Icon && <Icon aria-hidden className="size-3.5" />}
+      {children}
+    </button>
+  );
+}
+
+/** Two or more choices as one segmented control. */
+function Segmented<T extends string>({ legend, hideLegend, name, options, value, onChange }: {
+  legend: string;
+  hideLegend?: boolean;
+  name: string;
+  options: { value: T; label: string; icon?: LucideIcon }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className={hideLegend ? 'sr-only' : FIELD_LABEL}>{legend}</legend>
+      <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-ink/[0.045] p-1">
+        {options.map(({ value: option, label, icon: Icon }) => (
+          <label
+            key={option}
+            className={`flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg text-sm font-medium transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand ${
+              value === option ? 'bg-surface text-ink shadow-sm ring-1 ring-ink/5' : 'text-ink-2 hover:text-ink'
+            }`}
+          >
+            <input type="radio" name={name} value={option} checked={value === option} onChange={() => onChange(option)} className="sr-only" />
+            {Icon && <Icon aria-hidden className="size-4" />}
+            {label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }

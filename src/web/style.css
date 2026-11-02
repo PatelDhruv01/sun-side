@@ -1,47 +1,88 @@
 @import "tailwindcss";
 
 /*
- * Theme tokens. The three sun colours are categorical slots 1-3 of the data-viz palette,
- * validated for colour-blind separation in both modes: left window, right window, and sun
- * ahead or behind. Text always uses the ink tokens, never a series colour.
+ * Design tokens. The three sun colours are categorical slots 1-3 of the data-viz palette,
+ * validated for colour-blind separation in both modes: left window, right window, sun ahead
+ * or behind. They're kept for data (map, timeline, day strip); the brand amber is for the sun
+ * in illustrations and the logo. Text always uses the ink tokens, never a data colour.
  */
 @theme {
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-page: #f9f9f7;
-  --color-surface: #fcfcfb;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-page: #f7f6f2;
+  --color-surface: #ffffff;
+  --color-raised: #faf9f6;
   --color-ink: #0b0b0b;
   --color-ink-2: #52514e;
   --color-muted: #898781;
-  --color-hairline: #e1e0d9;
+  --color-hairline: #e7e5de;
   --color-axis: #c3c2b7;
   --color-sun-left: #2a78d6;
   --color-sun-right: #eb6834;
   --color-sun-ends: #1baf7a;
   --color-weak: #c3c2b7;
   --color-night: #52514e;
+  --color-good: #0ca30c;
   --color-critical: #d03b3b;
+  --color-brand: #f59e0b;
+  --color-brand-soft: #fdf0d2;
+  --color-glow: rgb(245 158 11 / 0.18);
+  --animate-spin-slow: spin 60s linear infinite;
 }
 
+/* Dark: the system setting, unless the reader picked light; or the reader's pick. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-page: #0d0d0d;
-    --color-surface: #1a1a19;
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --color-page: #0c0c0b;
+    --color-surface: #171716;
+    --color-raised: #1d1d1b;
     --color-ink: #f0efec;
     --color-ink-2: #c3c2b7;
-    --color-hairline: #2c2c2a;
-    --color-axis: #383835;
+    --color-muted: #8f8d87;
+    --color-hairline: #2b2b29;
+    --color-axis: #3a3a37;
     --color-sun-left: #3987e5;
     --color-sun-right: #d95926;
     --color-sun-ends: #199e70;
     --color-weak: #8a8984;
     --color-night: #4f4e4a;
+    --color-brand: #fbbf24;
+    --color-brand-soft: rgb(251 191 36 / 0.12);
+    --color-glow: rgb(251 191 36 / 0.1);
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-page: #0c0c0b;
+  --color-surface: #171716;
+  --color-raised: #1d1d1b;
+  --color-ink: #f0efec;
+  --color-ink-2: #c3c2b7;
+  --color-muted: #8f8d87;
+  --color-hairline: #2b2b29;
+  --color-axis: #3a3a37;
+  --color-sun-left: #3987e5;
+  --color-sun-right: #d95926;
+  --color-sun-ends: #199e70;
+  --color-weak: #8a8984;
+  --color-night: #4f4e4a;
+  --color-brand: #fbbf24;
+  --color-brand-soft: rgb(251 191 36 / 0.12);
+  --color-glow: rgb(251 191 36 / 0.1);
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 body {
   @apply bg-page font-sans text-ink antialiased;
+  /* a little morning sun in the corner */
+  background-image: radial-gradient(70rem 32rem at 88% -10%, var(--color-glow), transparent 70%);
+  background-repeat: no-repeat;
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--color-brand-soft);
 }

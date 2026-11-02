@@ -34,6 +34,13 @@ export function clockFormat(departure: number): ClockFormat {
   };
 }
 
+/** A length of time for reading at a glance: "16 min", "2 h", "1 h 14 min". */
+export function shortDuration(minutes: number): string {
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  return m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
 /** E.g. "Tue 15 Dec". */
 export const dayLabel = (time: number) => new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' }).format(time);
 

@@ -4,7 +4,7 @@ Which side of the bus or car should you sit on to avoid the sun? Instead of gues
 the direction of the destination, sun-side drives the real road minute by minute and works
 out how much direct sun comes through each window.
 
-**Status:** Step 5 of 6, weather and "not sure when I leave" (web page plus command-line test bench).
+**Status:** Step 6 of 6, polish done (free deploy still to do).
 
 ## Run it
 
@@ -21,6 +21,14 @@ as you type), the date and times, bus or car, and it shows where to sit, a map o
 coloured by sunny side, and the sun on each side window over the trip. Choose **Not sure yet**
 instead of a time and it works out every departure that day ("leave 06:00–12:00: sit LEFT…");
 pick one for the full answer. `npm run build` makes the static site in `dist/`.
+
+The page opens on a short explainer (how it works, why a compass isn't enough, FAQ) with
+the search up top and one-click example trips. An answer shows a seat map of the bus, the
+sun time on each side, any seat change worth making, and how sure it is. Every trip lives in
+the address bar, so **Share** (or copying the link) opens the same answer elsewhere, and the
+back button steps through your searches. **Return trip** flips the places and shows the whole
+day for the way back. It has light and dark themes (following the system until you pick one),
+works on phones, and can be added to a home screen.
 
 The same engine runs from the command line, with more detail and knobs:
 
@@ -128,7 +136,8 @@ for a pause in typing before searching. A failed request is retried once.
 - No shade from hills, buildings or trees.
 - The scoring thresholds are first guesses, to be tuned on real trips.
 - The page reads and shows times in the reader's own time zone.
-- The page's script is about 375 KB compressed, mostly the map library; it could load lazily.
+- The page's script is about 100 KB compressed; the map (about 290 KB, mostly MapLibre) loads
+  only once there's an answer to show.
 
 ## Roadmap
 
@@ -137,4 +146,4 @@ for a pause in typing before searching. A failed request is retried once.
 3. ~~Route and timing: place search, via points, alternatives, ticket-time stretch~~
 4. ~~Basic web UI: inputs, map, verdict, timeline~~
 5. ~~"Not sure when I leave" mode and weather (Open-Meteo)~~
-6. Polish and free deploy: sharing, return trip, mobile/PWA
+6. Polish and free deploy: ~~landing page, sharing, return trip, themes, mobile/PWA~~; free hosting next

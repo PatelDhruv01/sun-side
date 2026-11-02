@@ -1,3 +1,4 @@
+import { SunMedium } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { ClockFormat } from '../app/explain.ts';
 import type { RouteResult } from '../app/plan.ts';
@@ -6,6 +7,7 @@ import { compass } from '../engine/geo.ts';
 import type { TimelineBin } from '../engine/types.ts';
 import { weatherAt, type Weather } from '../engine/weather.ts';
 import { useWidth } from './hooks.ts';
+import { CARD } from './ui.tsx';
 
 const Y_MAX = 700; // W/m²: a side window gets at most about 660 under a clear sky
 const LANE = 64; // plot height of each lane
@@ -70,10 +72,11 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
   const tipLeft = crossX + 12 + TIP_WIDTH <= width ? crossX + 12 : Math.max(0, crossX - 12 - TIP_WIDTH);
 
   return (
-    <section aria-labelledby="timeline" className="rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-ink/5">
+    <section aria-labelledby="timeline" className={`${CARD} p-5 sm:p-6`}>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 id="timeline" className="text-sm font-medium text-ink-2">
-          Direct sun on each side window, W/m²
+        <h3 id="timeline" className="flex items-center gap-2 text-sm font-semibold">
+          <SunMedium aria-hidden className="size-4 text-muted" />
+          Sun on each side, minute by minute <span className="font-normal text-muted">W/m²</span>
         </h3>
         <button
           type="button"

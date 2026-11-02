@@ -12,8 +12,14 @@ export type ClockFormat = (time: number) => string;
 export interface Explanation {
   headline: string;
   reasons: string[];
-  tips: string[];
+  tips: Tip[];
   heat: string;
+}
+
+export interface Tip {
+  /** What the tip is about, so a page can give it an icon or draw it. */
+  kind: 'glare' | 'switch' | 'rows' | 'cool';
+  text: string;
 }
 
 /** Below this, in °C all the way, some people would rather sit in the sun. */
@@ -55,26 +61,34 @@ export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weath
     }
   }
 
-  const tips: string[] = [];
+  const tips: Tip[] = [];
   if (d.lessGlare) {
     const glary = otherSide(d.lessGlare);
-    tips.push(
-      `If anything, sit on the ${d.lessGlare.toUpperCase()}: the ${glary} side gets more low sun straight in your eyes ` +
+    tips.push({
+      kind: 'glare',
+      text:
+        `If anything, sit on the ${d.lessGlare.toUpperCase()}: the ${glary} side gets more low sun straight in your eyes ` +
         `(${duration(d.glare[glary])} vs ${duration(d.glare[d.lessGlare])}).`,
-    );
+    });
   }
   if (d.switchSeats) {
     const s = d.switchSeats;
-    tips.push(
-      `If you can change seats: start on the ${s.from.toUpperCase()}, move to the ${s.to.toUpperCase()} at about ` +
+    tips.push({
+      kind: 'switch',
+      text:
+        `If you can change seats: start on the ${s.from.toUpperCase()}, move to the ${s.to.toUpperCase()} at about ` +
         `${clock(s.at)} (km ${Math.round(s.distance / 1000)}). That cuts the sun you feel by ${Math.round(s.saving * 100)}%.`,
-    );
+    });
   }
   if (d.avoidRows) {
-    tips.push(`Tip: a lot of sun comes through the ${d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows'}.`);
+    const where = d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows';
+    tips.push({ kind: 'rows', text: `Tip: a lot of sun comes through the ${where}.` });
   }
   if (weather && d.sit !== 'either' && weather.maxTemperature < COOL) {
-    tips.push(`It'll be cool, ${temperatures(weather)}: if you'd rather sit in the sun, take the ${otherSide(d.sit).toUpperCase()} side.`);
+    tips.push({
+      kind: 'cool',
+      text: `It'll be cool, ${temperatures(weather)}: if you'd rather sit in the sun, take the ${otherSide(d.sit).toUpperCase()} side.`,
+    });
   }
   return { headline, reasons, tips, heat: `Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.` };
 }

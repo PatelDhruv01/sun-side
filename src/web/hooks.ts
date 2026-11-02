@@ -1,19 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react';
 
-const DARK = '(prefers-color-scheme: dark)';
-
-/** Whether the reader's system is in dark mode, kept up to date. */
-export function useDarkMode(): boolean {
-  const [dark, setDark] = useState(() => window.matchMedia(DARK).matches);
-  useEffect(() => {
-    const query = window.matchMedia(DARK);
-    const update = () => setDark(query.matches);
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
-  return dark;
-}
-
 /** An element's current width in CSS pixels (0 until it has been measured). */
 export function useWidth(ref: RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(0);

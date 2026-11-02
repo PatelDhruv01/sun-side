@@ -7,7 +7,9 @@ import { stretches, type SunCategory } from '../app/stretches.ts';
 import type { LonLat, SegmentPass } from '../engine/types.ts';
 import type { Place } from '../services/geocode.ts';
 import type { CandidateRoute } from '../services/routing.ts';
-import { themeColour, useDarkMode } from './hooks.ts';
+import { themeColour } from './hooks.ts';
+import { useTheme } from './theme.ts';
+import { CARD } from './ui.tsx';
 
 // MapLibre looks for its worker next to its own file, which bundling moves; point it at Vite's copy.
 setWorkerUrl(workerUrl);
@@ -46,7 +48,7 @@ const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
 export function RouteMap({ routes, selected, passes, places, clock, onSelect }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
-  const dark = useDarkMode();
+  const { dark } = useTheme();
 
   // A fresh map whenever the colour scheme changes: the dark base map is a different style.
   useEffect(() => {
@@ -167,11 +169,11 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect }: 
   }, [map, clock, onSelect]);
 
   return (
-    <section aria-label="Route map" className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-ink/5">
+    <section aria-label="Route map" className={`${CARD} overflow-hidden`}>
       <div ref={box} className="h-72 w-full lg:h-[30rem]" />
-      {routes && !passes && <p className="px-4 py-3 text-xs text-ink-2">Pick a departure time to see the route coloured by sunny side.</p>}
+      {routes && !passes && <p className="px-5 py-3.5 text-xs text-ink-2">Pick a departure time to see the route coloured by sunny side.</p>}
       {routes && passes && (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 py-3 text-xs text-ink-2">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 px-5 py-3.5 text-xs text-ink-2">
           {CATEGORIES.map((c) => (
             <li key={c.category} className="flex items-center gap-1.5">
               <span aria-hidden className={`h-1 w-4 rounded-full ${c.key}`} />
