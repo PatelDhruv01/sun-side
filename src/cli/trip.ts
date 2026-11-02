@@ -4,15 +4,18 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { otherSide, type Decision, type ScoringOptions, type SeatSide } from '../engine/decide.ts';
-import { agreement, evaluate, shiftedVerdicts, type Evaluation, type Shifted } from '../engine/evaluate.ts';
-import { compass, distance, lerp, toDeg, toRad, wrap360 } from '../engine/geo.ts';
+import { departureSummary, duration as hm, explain, routesSummary, verdictLabel } from '../app/explain.ts';
+import { departureShifts, planTrip, type RouteResult } from '../app/plan.ts';
+import { timelineRows } from '../app/rows.ts';
+import { CATEGORY_COLOURS, stretches } from '../app/stretches.ts';
+import type { Decision, ScoringOptions } from '../engine/decide.ts';
+import type { Shifted } from '../engine/evaluate.ts';
+import { compass, distance, lerp } from '../engine/geo.ts';
 import { SUN_THRESHOLD, type TripStats } from '../engine/summary.ts';
-import { timeScale, type TimeScale, type Vehicle } from '../engine/timing.ts';
-import type { Faces, LonLat, SegmentPass, Side, TimelineBin } from '../engine/types.ts';
+import type { Timing, Vehicle } from '../engine/timing.ts';
+import type { Faces, LonLat, Side, TimelineBin } from '../engine/types.ts';
 import { searchPlaces, type Place } from '../services/geocode.ts';
 import type { FetchJson } from '../services/http.ts';
-import { findRoutes, type CandidateRoute } from '../services/routing.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const USER_AGENT = 'sun-side/0.1 (personal prototype)';
@@ -32,6 +35,9 @@ const USAGE = `Usage: npm run trip -- --from <place> --to <place> --depart <time
   --cool-down    minutes to cool off once out of the sun (default 15)
   --refresh      ignore cached lookups`;
 
+/** How the command line tells you to pin or pick a route. */
+const HINTS = { pin: 'pin it with --via', pick: 'show the one your bus takes with --route' };
+
 interface Clock {
   offset: number; // minutes east of UTC
   departure: number;
@@ -41,12 +47,6 @@ interface Clock {
 interface Found {
   place: Place;
   others: Place[];
-}
-
-/** One candidate route, simulated and decided. */
-interface Result extends Evaluation {
-  route: CandidateRoute;
-  stretch: TimeScale;
 }
 
 async function main() {
@@ -74,20 +74,8 @@ async function main() {
   }
 
   const offset = parseOffset(values.tz);
-  const fetchJson = cachedFetch(values.refresh);
-  const from = await findPlace(values.from, fetchJson);
-  const to = await findPlace(values.to, fetchJson);
-  const middle = lerp(from.place.position, to.place.position, 0.5);
-  const vias: Found[] = [];
-  for (const via of values.via ?? []) vias.push(await findPlace(via, fetchJson, middle));
-  const { routes, notes } = await findRoutes([from, ...vias, to].map((f) => f.place.position), fetchJson);
-
-  const pick = Number(values.route) - 1;
-  if (!Number.isInteger(pick) || pick < 0 || pick >= routes.length) {
-    throw new Error(`--route must be a number from 1 to ${routes.length}.`);
-  }
   const departure = parseTime(values.depart, offset);
-  const timing = {
+  const timing: Timing = {
     departure,
     vehicle: parseVehicle(values.vehicle),
     arrival: values.arrive ? parseTime(values.arrive, offset, departure) : undefined,
@@ -95,17 +83,26 @@ async function main() {
   };
   if (timing.scale !== undefined && !(timing.scale > 0)) throw new Error('--scale must be a positive number.');
   const scoring = readScoring(values.continuity, values['cool-down']);
-  const results: Result[] = routes.map((route) => {
-    const stretch = timeScale(total(route.segmentDurations), timing);
-    return { route, stretch, ...evaluate(route, departure, stretch.scale, scoring) };
-  });
+
+  const fetchJson = cachedFetch(values.refresh);
+  const from = await findPlace(values.from, fetchJson);
+  const to = await findPlace(values.to, fetchJson);
+  const middle = lerp(from.place.position, to.place.position, 0.5);
+  const vias: Found[] = [];
+  for (const via of values.via ?? []) vias.push(await findPlace(via, fetchJson, middle));
+  const { results, notes } = await planTrip([from, ...vias, to].map((f) => f.place.position), timing, scoring, fetchJson);
+
+  const pick = Number(values.route) - 1;
+  if (!Number.isInteger(pick) || pick < 0 || pick >= results.length) {
+    throw new Error(`--route must be a number from 1 to ${results.length}.`);
+  }
   const chosen = results[pick];
   const clock: Clock = { offset, departure };
 
   printPlaces(from, vias, to);
   printTrip(chosen, pick, results.length, timing.vehicle, clock);
   printVerdict(chosen.decision, chosen.stats, clock);
-  printChecks(results, pick, shiftedVerdicts(chosen.route, departure, chosen.stretch.scale, scoring), notes, vias.length > 0);
+  printChecks(results, pick, departureShifts(chosen, timing, scoring), notes, vias.length > 0);
   printSides(chosen.stats, chosen.decision, clock);
   printTimeline(chosen.bins, Math.max(1, Number(values.every) || 10), clock);
   const files = await writeOutputs(from.place, to.place, results, pick, clock);
@@ -218,7 +215,7 @@ function printPlaces(from: Found, vias: Found[], to: Found) {
   show('To', to);
 }
 
-function printTrip({ route, stretch, stats }: Result, pick: number, count: number, vehicle: Vehicle, clock: Clock) {
+function printTrip({ route, stretch, stats }: RouteResult, pick: number, count: number, vehicle: Vehicle, clock: Clock) {
   const which = count > 1 ? `, route ${pick + 1} of ${count}` : '';
   console.log(`Road  ${(route.distance / 1000).toFixed(0)} km ${route.label}${which}; ${hm(total(route.segmentDurations) / 60)} in free-flowing traffic`);
   const basis =
@@ -232,9 +229,16 @@ function printTrip({ route, stretch, stats }: Result, pick: number, count: numbe
   console.log(`      ${hm(stats.minutes)} on the road, ${hm(stats.daylightMinutes)} of it in daylight`);
 }
 
+function printVerdict(d: Decision, stats: TripStats, clock: Clock) {
+  const { headline, reasons, tips, heat } = explain(d, stats, (t) => hhmm(t, clock));
+  console.log(`\nVERDICT  ${headline}`);
+  for (const line of [...reasons, ...tips, heat]) console.log(`         ${line}`);
+}
+
 /** Does the answer hold on the other routes, and if the bus leaves a little early or late? */
-function printChecks(results: Result[], pick: number, shifts: Shifted[], notes: string[], pinned: boolean) {
+function printChecks(results: RouteResult[], pick: number, shifts: Shifted[], notes: string[], pinned: boolean) {
   console.log('');
+  const sits = results.map((r) => r.decision.sit);
   if (results.length > 1) {
     console.log('Routes found, with the verdict for each:');
     results.forEach((r, i) => {
@@ -242,102 +246,13 @@ function printChecks(results: Result[], pick: number, shifts: Shifted[], notes: 
       const mark = i === pick ? '   ← shown here' : '';
       console.log(`  ${i + 1}. ${name.padEnd(40)} ${hm(r.stats.minutes)}   ${verdictLabel(r.decision.sit, r.decision.confidence)}${mark}`);
     });
-    const verdicts = agreement(results.map((r) => r.decision.sit));
-    console.log(
-      verdicts === 'agree'
-        ? '  All routes agree.'
-        : verdicts === 'mostly'
-          ? '  The routes broadly agree; on some it hardly matters.'
-          : '  The routes DISAGREE: show the one your bus takes with --route, or pin it with --via.',
-    );
+    console.log(`  ${routesSummary(sits, pinned, HINTS)}`);
   } else {
-    console.log(pinned ? 'Route pinned through your via towns.' : 'Only one route found. If your bus goes another way, pin it with --via.');
+    console.log(routesSummary(sits, pinned, HINTS));
   }
-  const when = (shift: number) => `${Math.abs(shift) >= 60 ? `${Math.abs(shift) / 60} h` : `${Math.abs(shift)} min`} ${shift < 0 ? 'early' : 'late'}`;
-  const sit = results[pick].decision.sit;
-  const flips = shifts.filter((s) => s.sit !== sit);
-  if (!flips.length) {
-    console.log(`Leaving ${list(shifts.map((s) => when(s.shift)))} gives the same answer.`);
-  } else {
-    const lead = sit === 'either' ? 'This departure is near the changeover' : 'Careful';
-    console.log(`${lead}: ${flips.map((s) => `leaving ${when(s.shift)} means ${verdictLabel(s.sit)}`).join('; ')}.`);
-  }
+  console.log(departureSummary(results[pick].decision.sit, shifts));
   for (const note of notes) console.log(`Note: ${note}`);
 }
-
-const verdictLabel = (sit: Decision['sit'], confidence?: Decision['confidence']) =>
-  sit === 'either' ? 'either side' : `sit ${sit.toUpperCase()}${confidence === 'slight' ? ' (slightly)' : ''}`;
-
-/** "a, b or c". */
-const list = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(''));
-
-function printVerdict(d: Decision, stats: TripStats, clock: Clock) {
-  const lines: string[] = [];
-  if (d.sit === 'either') {
-    if (stats.daylightMinutes < 1) {
-      lines.push('Either side: the whole trip is after dark.');
-    } else if (d.confidence === 'little sun') {
-      lines.push('Either side: not much sun reaches the side windows.');
-      lines.push(
-        stats.daylightMinutes < stats.minutes / 4
-          ? 'Most of the trip is in the dark.'
-          : d.avoidRows
-            ? 'The sun is mostly ahead of or behind you.'
-            : 'The sun is weak or high overhead most of the way.',
-      );
-      if (stats.sides.left.sunMinutes >= 1 || stats.sides.right.sunMinutes >= 1) {
-        lines.push(`${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`);
-      }
-    } else {
-      lines.push('Either side: both get about the same sun.');
-      lines.push(`${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`);
-    }
-  } else {
-    const worse = otherSide(d.sit);
-    lines.push(`Sit on the ${d.sit.toUpperCase()} side${d.confidence === 'slight' ? ' (only slightly better)' : ''}.`);
-    lines.push(`${capitalise(sunStory(worse, stats, clock))}; ${sunStory(d.sit, stats, clock)}.`);
-    const chosen = stats.sides[d.sit];
-    const rejected = stats.sides[worse];
-    if (chosen.energy > rejected.energy) {
-      lines.push(
-        chosen.longestMinutes < rejected.longestMinutes
-          ? `The ${d.sit} side gets more sun in total, but in shorter bursts; a long unbroken stretch like the ${worse} side's is more tiring.`
-          : `The ${d.sit} side gets more sun in total, but weaker; the ${worse} side's sun is more intense.`,
-      );
-    }
-  }
-  if (d.lessGlare) {
-    const glary = otherSide(d.lessGlare);
-    lines.push(
-      `If anything, sit on the ${d.lessGlare.toUpperCase()}: the ${glary} side gets more low sun straight in your eyes ` +
-        `(${hm(d.glare[glary])} vs ${hm(d.glare[d.lessGlare])}).`,
-    );
-  }
-  if (d.switchSeats) {
-    const s = d.switchSeats;
-    lines.push(
-      `If you can change seats: start on the ${s.from.toUpperCase()}, move to the ${s.to.toUpperCase()} at about ` +
-        `${hhmm(s.at, clock)} (km ${Math.round(s.distance / 1000)}). That cuts the sun you feel by ${Math.round(s.saving * 100)}%.`,
-    );
-  }
-  if (d.avoidRows) {
-    lines.push(`Tip: a lot of sun comes through the ${d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows'}.`);
-  }
-  lines.push(`Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.`);
-
-  console.log(`\nVERDICT  ${lines[0]}`);
-  for (const line of lines.slice(1)) console.log(`         ${line}`);
-}
-
-/** E.g. "the right side gets sun for 1h 01m (all in one unbroken stretch from 09:00)". */
-function sunStory(side: SeatSide, stats: TripStats, clock: Clock): string {
-  const s = stats.sides[side];
-  if (s.longestStart === undefined || s.sunMinutes < 1) return `the ${side} side gets almost no direct sun`;
-  const stretch = s.longestMinutes >= s.sunMinutes - 0.5 ? 'all in one unbroken stretch' : `longest unbroken stretch ${hm(s.longestMinutes)}`;
-  return `the ${side} side gets sun for ${hm(s.sunMinutes)} (${stretch} from ${hhmm(s.longestStart, clock)})`;
-}
-
-const capitalise = (text: string) => text[0].toUpperCase() + text.slice(1);
 
 function printSides(stats: TripStats, decision: Decision, clock: Clock) {
   console.log(`\nDirect sun on each side (clear sky; "sun" = at least ${SUN_THRESHOLD} W/m² on that window)`);
@@ -357,33 +272,13 @@ function printSides(stats: TripStats, decision: Decision, clock: Clock) {
 function printTimeline(bins: TimelineBin[], every: number, clock: Clock) {
   console.log(`\nTimeline, ${every} min per row (bars = direct sun on that window; a full bar is ${BAR_FULL} W/m²)`);
   console.log(' Time      km   Road        Sun (direction / height)   Left window       Right window      Front / rear');
-  for (let i = 0; i < bins.length; i += every) {
-    const group = bins.slice(i, i + every);
-    const { heading, faces } = average(group);
-    const sun = group[Math.floor(group.length / 2)].sun;
+  for (const { start, distance, heading, sun, faces } of timelineRows(bins, every)) {
     const sky = sun.elevation > 0 ? `${compass(sun.azimuth).padEnd(3)} ${num(sun.azimuth, 3)}° / ${num(sun.elevation, 2)}° high` : 'below the horizon';
     console.log(
-      ` ${hhmm(group[0].start, clock).padEnd(8)} ${num(group[0].distance / 1000, 4)}   ${compass(heading).padEnd(3)} ${num(heading, 3)}°    ` +
+      ` ${hhmm(start, clock).padEnd(8)} ${num(distance / 1000, 4)}   ${compass(heading).padEnd(3)} ${num(heading, 3)}°    ` +
         `${sky.padEnd(25)}  ${bar(faces.left)}  ${bar(faces.right)}  ${ends(faces)}`,
     );
   }
-}
-
-/** Time-weighted average of several bins (heading averaged as a vector). */
-function average(group: TimelineBin[]): { heading: number; faces: Faces } {
-  const faces: Faces = { left: 0, right: 0, front: 0, rear: 0, roof: 0 };
-  const keys = Object.keys(faces) as (keyof Faces)[];
-  let seconds = 0;
-  let x = 0;
-  let y = 0;
-  for (const bin of group) {
-    seconds += bin.seconds;
-    x += Math.sin(toRad(bin.heading)) * bin.seconds;
-    y += Math.cos(toRad(bin.heading)) * bin.seconds;
-    for (const key of keys) faces[key] += bin.faces[key] * bin.seconds;
-  }
-  for (const key of keys) faces[key] /= seconds || 1;
-  return { heading: wrap360(toDeg(Math.atan2(x, y))), faces };
 }
 
 function bar(value: number): string {
@@ -398,11 +293,6 @@ function ends({ front, rear }: Faces): string {
 }
 
 const num = (value: number, width: number) => String(Math.round(value)).padStart(width);
-
-function hm(minutes: number): string {
-  const m = Math.round(minutes);
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
-}
 
 /** Local "HH:MM", with "+1" once the trip has run past midnight. */
 function hhmm(time: number, { offset, departure }: Clock): string {
@@ -426,7 +316,7 @@ function zone(offset: number): string {
 
 // ---------- files ----------
 
-async function writeOutputs(from: Place, to: Place, results: Result[], pick: number, clock: Clock): Promise<string[]> {
+async function writeOutputs(from: Place, to: Place, results: RouteResult[], pick: number, clock: Clock): Promise<string[]> {
   const stamp = new Date(clock.departure + clock.offset * 60_000).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   const name = `${slug(from.label)}-to-${slug(to.label)}-${stamp}`;
   const dir = path.join(ROOT, 'out');
@@ -459,25 +349,11 @@ function toCsv(bins: TimelineBin[], clock: Clock): string {
   return `${[header, ...rows].join('\n')}\n`;
 }
 
-// Colours use the simplestyle-spec properties that geojson.io understands.
-const COLOURS = {
-  'sun on left': '#e8590c',
-  'sun on right': '#1971c2',
-  'sun ahead or behind': '#f2c200',
-  'weak sun': '#adb5bd',
-  night: '#343a40',
-} as const;
-type Category = keyof typeof COLOURS;
-
-function category({ sun, faces }: SegmentPass): Category {
-  if (sun.elevation <= 0) return 'night';
-  if (Math.max(faces.left, faces.right) >= SUN_THRESHOLD) return faces.left > faces.right ? 'sun on left' : 'sun on right';
-  if (Math.max(faces.front, faces.rear) >= SUN_THRESHOLD) return 'sun ahead or behind';
-  return 'weak sun';
-}
-
-/** The chosen route as coloured stretches (one per change of sunny side), the other routes in grey, and markers. */
-function toGeoJson(from: Place, to: Place, results: Result[], pick: number, clock: Clock) {
+/**
+ * The chosen route as coloured stretches (one per change of sunny side), the other routes in
+ * grey, and markers. Colours use the simplestyle-spec properties that geojson.io understands.
+ */
+function toGeoJson(from: Place, to: Place, results: RouteResult[], pick: number, clock: Clock) {
   const { route, passes } = results[pick];
   const others = results
     .filter((_, i) => i !== pick)
@@ -486,23 +362,12 @@ function toGeoJson(from: Place, to: Place, results: Result[], pick: number, cloc
       properties: {
         route: r.route.label,
         verdict: verdictLabel(r.decision.sit, r.decision.confidence),
-        stroke: '#868e96',
+        stroke: '#898781',
         'stroke-width': 3,
         'stroke-opacity': 0.6,
       },
       geometry: { type: 'LineString', coordinates: r.route.coords },
     }));
-  const stretches: { category: Category; coords: LonLat[]; from: number; to: number }[] = [];
-  for (const pass of passes) {
-    const cat = category(pass);
-    let stretch = stretches.at(-1);
-    if (!stretch || stretch.category !== cat) {
-      stretch = { category: cat, coords: [route.coords[pass.index]], from: pass.start, to: pass.start };
-      stretches.push(stretch);
-    }
-    stretch.coords.push(route.coords[pass.index + 1]);
-    stretch.to = pass.start + pass.seconds * 1000;
-  }
   const marker = (place: Place, role: string, colour: string) => ({
     type: 'Feature',
     properties: { name: place.label, role, 'marker-color': colour },
@@ -512,13 +377,13 @@ function toGeoJson(from: Place, to: Place, results: Result[], pick: number, cloc
     type: 'FeatureCollection',
     features: [
       ...others,
-      ...stretches.map((s) => ({
+      ...stretches(route, passes).map((s) => ({
         type: 'Feature',
-        properties: { category: s.category, from: hhmm(s.from, clock), to: hhmm(s.to, clock), stroke: COLOURS[s.category], 'stroke-width': 5 },
+        properties: { category: s.category, from: hhmm(s.from, clock), to: hhmm(s.to, clock), stroke: CATEGORY_COLOURS[s.category], 'stroke-width': 5 },
         geometry: { type: 'LineString', coordinates: s.coords },
       })),
-      marker(from, 'start', '#2f9e44'),
-      marker(to, 'end', '#c92a2a'),
+      marker(from, 'start', '#0b0b0b'),
+      marker(to, 'end', '#0b0b0b'),
     ],
   };
 }

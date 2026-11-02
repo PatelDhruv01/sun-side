@@ -4,7 +4,7 @@ Which side of the bus or car should you sit on to avoid the sun? Instead of gues
 the direction of the destination, sun-side drives the real road minute by minute and works
 out how much direct sun comes through each window.
 
-**Status:** Step 3 of 6, routes and timing (command line only, no UI yet).
+**Status:** Step 4 of 6, a basic web page (plus the command-line test bench).
 
 ## Run it
 
@@ -13,6 +13,17 @@ Needs Node.js 22.18 or newer (it runs the TypeScript directly). Everything it us
 ```bash
 npm install
 npm test
+npm run dev
+```
+
+`npm run dev` serves the web page at http://localhost:5173: pick the places (suggestions come
+as you type), the date and times, bus or car, and it shows where to sit, a map of the route
+coloured by sunny side, and the sun on each side window over the trip. `npm run build` makes
+the static site in `dist/`.
+
+The same engine runs from the command line, with more detail and knobs:
+
+```bash
 npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-12-15 09:00" --arrive "11:00"
 ```
 
@@ -37,8 +48,9 @@ files to `out/`:
 
 - a `.csv` with one row per minute (time, position, heading, sun direction and height, W/m² on each face)
 - a `.geojson` map: drop it on [geojson.io](https://geojson.io) to see the route coloured by sunny side
-  (orange = left, blue = right, yellow = ahead/behind, grey = weak sun, dark = night), with the
-  other routes found in thin grey
+  (blue = left, orange = right, aqua = ahead/behind, light grey = weak sun, dark grey = night),
+  with the other routes found in thin grey. These are the web page's colours too: categorical
+  slots 1-3 of a palette checked for colour-blind separation in light and dark mode.
 
 ## How it works
 
@@ -78,17 +90,20 @@ files to `out/`:
 
 | Folder | What's in it |
 |---|---|
-| `src/engine` | Pure TypeScript, no Node APIs, so it can run in the browser later |
+| `src/engine` | The sun, the simulation and the verdict: pure TypeScript, runs in Node and the browser |
 | `src/services` | Free web APIs: OSRM and Valhalla routing, Photon and Open-Meteo place search |
+| `src/app` | Shared by the page and the command line: the trip pipeline, the verdict in words, map stretches |
+| `src/web` | The web page: React, Tailwind and MapLibre, built with Vite |
 | `src/cli` | The `trip` command-line test bench |
-| `test` | `node:test` checks: hand-checkable directions, SunCalc cross-check, synthetic roads |
+| `test` | `node:test` checks: hand-checkable directions, SunCalc cross-check, synthetic roads, fake API answers |
 
 ## Data sources
 
-Map data © OpenStreetMap contributors (ODbL). Routing by the public OSRM and Valhalla servers
-(FOSSGIS), fair use only: at most 1 request a second, non-commercial. Place search by Photon
-(komoot) and Open-Meteo (GeoNames data). Responses are cached in `cache/` so re-runs don't hit
-the servers again, and a failed request is retried once.
+Map data © OpenStreetMap contributors (ODbL); map tiles by OpenFreeMap (free, no key, no limits).
+Routing by the public OSRM and Valhalla servers (FOSSGIS), fair use only: at most 1 request a
+second, non-commercial. Place search by Photon (komoot) and Open-Meteo (GeoNames data). The
+command line caches responses in `cache/`; the page fetches each URL once per visit and waits
+for a pause in typing before searching. A failed request is retried once.
 
 ## Known limits (for now)
 
@@ -99,12 +114,14 @@ the servers again, and a failed request is retried once.
   `--via` is the way to match a bus that goes another way.
 - No shade from hills, buildings or trees.
 - The scoring thresholds are first guesses, to be tuned on real trips.
+- The page reads and shows times in the reader's own time zone.
+- The page's script is about 375 KB compressed, mostly the map library; it could load lazily.
 
 ## Roadmap
 
 1. ~~Sun engine~~
 2. ~~Scoring: the "heat bucket" for unbroken vs broken sun, honest "doesn't matter" answers, seat switching~~
 3. ~~Route and timing: place search, via points, alternatives, ticket-time stretch~~
-4. Basic web UI: inputs, map, verdict, timeline
+4. ~~Basic web UI: inputs, map, verdict, timeline~~
 5. "Not sure when I leave" mode and weather (Open-Meteo)
 6. Polish and free deploy: sharing, return trip, mobile/PWA

@@ -1,10 +1,12 @@
 {
-  // Node runs the .ts files directly (type stripping), so tsc is only a type checker.
+  // Node runs the .ts files directly (type stripping) and Vite builds the web page,
+  // so tsc is only a type checker.
   "compilerOptions": {
     "target": "es2023",
-    "lib": ["es2023"],
+    "lib": ["es2023", "dom", "dom.iterable"],
     "module": "nodenext",
-    "types": ["node"],
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -12,5 +14,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "vite.config.ts"]
 }

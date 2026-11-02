@@ -1,0 +1,119 @@
+// The verdict in words, shared by the command line and the web page.
+import { otherSide, type Decision, type SeatSide } from '../engine/decide.ts';
+import { agreement, type Shifted } from '../engine/evaluate.ts';
+import type { TripStats } from '../engine/summary.ts';
+
+/** Shows a clock time (ms since epoch) the way the reader expects, e.g. "09:00" or "06:10 +1". */
+export type ClockFormat = (time: number) => string;
+
+/** A verdict spelled out: the headline, why, tips, and the heat scores. */
+export interface Explanation {
+  headline: string;
+  reasons: string[];
+  tips: string[];
+  heat: string;
+}
+
+export function explain(d: Decision, stats: TripStats, clock: ClockFormat): Explanation {
+  const reasons: string[] = [];
+  const bothSides = () => `${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`;
+  let headline: string;
+  if (d.sit === 'either') {
+    if (stats.daylightMinutes < 1) {
+      headline = 'Either side: the whole trip is after dark.';
+    } else if (d.confidence === 'little sun') {
+      headline = 'Either side: not much sun reaches the side windows.';
+      reasons.push(
+        stats.daylightMinutes < stats.minutes / 4
+          ? 'Most of the trip is in the dark.'
+          : d.avoidRows
+            ? 'The sun is mostly ahead of or behind you.'
+            : 'The sun is weak or high overhead most of the way.',
+      );
+      if (stats.sides.left.sunMinutes >= 1 || stats.sides.right.sunMinutes >= 1) reasons.push(bothSides());
+    } else {
+      headline = 'Either side: both get about the same sun.';
+      reasons.push(bothSides());
+    }
+  } else {
+    const worse = otherSide(d.sit);
+    headline = `Sit on the ${d.sit.toUpperCase()} side${d.confidence === 'slight' ? ' (only slightly better)' : ''}.`;
+    reasons.push(`${capitalise(sunStory(worse, stats, clock))}; ${sunStory(d.sit, stats, clock)}.`);
+    const chosen = stats.sides[d.sit];
+    const rejected = stats.sides[worse];
+    if (chosen.energy > rejected.energy) {
+      reasons.push(
+        chosen.longestMinutes < rejected.longestMinutes
+          ? `The ${d.sit} side gets more sun in total, but in shorter bursts; a long unbroken stretch like the ${worse} side's is more tiring.`
+          : `The ${d.sit} side gets more sun in total, but weaker; the ${worse} side's sun is more intense.`,
+      );
+    }
+  }
+
+  const tips: string[] = [];
+  if (d.lessGlare) {
+    const glary = otherSide(d.lessGlare);
+    tips.push(
+      `If anything, sit on the ${d.lessGlare.toUpperCase()}: the ${glary} side gets more low sun straight in your eyes ` +
+        `(${duration(d.glare[glary])} vs ${duration(d.glare[d.lessGlare])}).`,
+    );
+  }
+  if (d.switchSeats) {
+    const s = d.switchSeats;
+    tips.push(
+      `If you can change seats: start on the ${s.from.toUpperCase()}, move to the ${s.to.toUpperCase()} at about ` +
+        `${clock(s.at)} (km ${Math.round(s.distance / 1000)}). That cuts the sun you feel by ${Math.round(s.saving * 100)}%.`,
+    );
+  }
+  if (d.avoidRows) {
+    tips.push(`Tip: a lot of sun comes through the ${d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows'}.`);
+  }
+  return { headline, reasons, tips, heat: `Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.` };
+}
+
+/** E.g. "the right side gets sun for 1h 01m (all in one unbroken stretch from 09:00)". */
+export function sunStory(side: SeatSide, stats: TripStats, clock: ClockFormat): string {
+  const s = stats.sides[side];
+  if (s.longestStart === undefined || s.sunMinutes < 1) return `the ${side} side gets almost no direct sun`;
+  const stretch = s.longestMinutes >= s.sunMinutes - 0.5 ? 'all in one unbroken stretch' : `longest unbroken stretch ${duration(s.longestMinutes)}`;
+  return `the ${side} side gets sun for ${duration(s.sunMinutes)} (${stretch} from ${clock(s.longestStart)})`;
+}
+
+/** Minutes as "1h 05m". */
+export function duration(minutes: number): string {
+  const m = Math.round(minutes);
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+/** The short form for lists: "sit LEFT", "sit RIGHT (slightly)", "either side". */
+export const verdictLabel = (sit: Decision['sit'], confidence?: Decision['confidence']) =>
+  sit === 'either' ? 'either side' : `sit ${sit.toUpperCase()}${confidence === 'slight' ? ' (slightly)' : ''}`;
+
+/** How the reader can pin a route or pick one, in the words of the interface they're using. */
+export interface RouteHints {
+  pin: string;
+  pick: string;
+}
+
+/** Whether the routes found agree, in a sentence. `pinned` means the reader fixed the route with via towns. */
+export function routesSummary(sits: Decision['sit'][], pinned: boolean, hints: RouteHints): string {
+  if (sits.length <= 1) return pinned ? 'Route pinned through your via towns.' : `Only one route found. If your bus goes another way, ${hints.pin}.`;
+  const verdicts = agreement(sits);
+  if (verdicts === 'agree') return 'All routes agree.';
+  if (verdicts === 'mostly') return 'The routes broadly agree; on some it hardly matters.';
+  return `The routes DISAGREE: ${hints.pick}, or ${hints.pin}.`;
+}
+
+/** Whether leaving a little early or late changes the answer, in a sentence. */
+export function departureSummary(sit: Decision['sit'], shifts: Shifted[]): string {
+  const when = (shift: number) => `${Math.abs(shift) >= 60 ? `${Math.abs(shift) / 60} h` : `${Math.abs(shift)} min`} ${shift < 0 ? 'early' : 'late'}`;
+  const flips = shifts.filter((s) => s.sit !== sit);
+  if (!flips.length) return `Leaving ${list(shifts.map((s) => when(s.shift)))} gives the same answer.`;
+  const lead = sit === 'either' ? 'This departure is near the changeover' : 'Careful';
+  return `${lead}: ${flips.map((s) => `leaving ${when(s.shift)} means ${verdictLabel(s.sit)}`).join('; ')}.`;
+}
+
+const capitalise = (text: string) => text[0].toUpperCase() + text.slice(1);
+
+/** "a, b or c". */
+const list = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(''));
