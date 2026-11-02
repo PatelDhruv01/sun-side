@@ -3,9 +3,10 @@ import { LngLatBounds, MapLibreMap, NavigationControl, Popup, setWorkerUrl, type
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { useEffect, useRef, useState } from 'react';
 import type { ClockFormat } from '../app/explain.ts';
-import type { RouteResult } from '../app/plan.ts';
 import { stretches, type SunCategory } from '../app/stretches.ts';
+import type { LonLat, SegmentPass } from '../engine/types.ts';
 import type { Place } from '../services/geocode.ts';
+import type { CandidateRoute } from '../services/routing.ts';
 import { themeColour, useDarkMode } from './hooks.ts';
 
 // MapLibre looks for its worker next to its own file, which bundling moves; point it at Vite's copy.
@@ -26,15 +27,23 @@ const CATEGORIES: { category: SunCategory; token: string; key: string; name: str
 const NOTHING: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 interface Props {
-  results: RouteResult[] | null;
+  routes: CandidateRoute[] | null;
   selected: number;
+  /** The chosen route as driven at one departure, to colour it by sunny side; without it, it's drawn plain. */
+  passes: SegmentPass[] | null;
   /** Start, via towns, end. */
   places: Place[];
   clock: ClockFormat | null;
   onSelect: (index: number) => void;
 }
 
-export function RouteMap({ results, selected, places, clock, onSelect }: Props) {
+const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
+  type: 'Feature' as const,
+  properties,
+  geometry: { type: 'LineString' as const, coordinates },
+});
+
+export function RouteMap({ routes, selected, passes, places, clock, onSelect }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
   const dark = useDarkMode();
@@ -81,29 +90,25 @@ export function RouteMap({ results, selected, places, clock, onSelect }: Props) 
     };
   }, [dark]);
 
-  // The chosen route coloured by sunny side, the others in grey, and the places as dots.
+  // The chosen route coloured by sunny side (or plain, with no time picked), the others in grey, and the places as dots.
   useEffect(() => {
     if (!map) return;
     const source = (id: string) => map.getSource(id) as GeoJSONSource;
-    if (!results) {
+    if (!routes) {
       for (const id of ['alternatives', 'route', 'places']) source(id).setData(NOTHING);
       return;
     }
     const colours = Object.fromEntries(CATEGORIES.map((c) => [c.category, themeColour(c.token)])) as Record<SunCategory, string>;
-    const chosen = results[selected];
+    const chosen = routes[selected];
     source('alternatives').setData({
       type: 'FeatureCollection',
-      features: results.flatMap((r, index) =>
-        index === selected ? [] : [{ type: 'Feature', properties: { index }, geometry: { type: 'LineString', coordinates: r.route.coords } }],
-      ),
+      features: routes.flatMap((route, index) => (index === selected ? [] : [line(route.coords, { index })])),
     });
     source('route').setData({
       type: 'FeatureCollection',
-      features: stretches(chosen.route, chosen.passes).map((s) => ({
-        type: 'Feature',
-        properties: { colour: colours[s.category], category: s.category, from: s.from, to: s.to },
-        geometry: { type: 'LineString', coordinates: s.coords },
-      })),
+      features: passes
+        ? stretches(chosen, passes).map((s) => line(s.coords, { colour: colours[s.category], category: s.category, from: s.from, to: s.to }))
+        : [line(chosen.coords, { colour: themeColour('--color-ink') })],
     });
     const ink = themeColour('--color-ink');
     const surface = themeColour('--color-surface');
@@ -119,9 +124,9 @@ export function RouteMap({ results, selected, places, clock, onSelect }: Props) 
       }),
     });
     const bounds = new LngLatBounds();
-    for (const r of results) for (const point of r.route.coords) bounds.extend(point);
+    for (const route of routes) for (const point of route.coords) bounds.extend(point);
     map.fitBounds(bounds, { padding: 40, duration: 500, maxZoom: 13 });
-  }, [map, results, selected, places]);
+  }, [map, routes, selected, passes, places]);
 
   // Hover or tap a stretch for its times; click a grey route to switch to it.
   useEffect(() => {
@@ -130,7 +135,7 @@ export function RouteMap({ results, selected, places, clock, onSelect }: Props) 
     const names = Object.fromEntries(CATEGORIES.map((c) => [c.category, c.name])) as Record<SunCategory, string>;
     const show = (e: MapLayerMouseEvent) => {
       const props = e.features?.[0]?.properties;
-      if (!props) return;
+      if (!props?.category) return; // a plain route has no times to show
       popup.setLngLat(e.lngLat).setText(`${clock(props.from)}–${clock(props.to)}: ${names[props.category as SunCategory].toLowerCase()}`).addTo(map);
     };
     const hide = () => popup.remove();
@@ -164,7 +169,8 @@ export function RouteMap({ results, selected, places, clock, onSelect }: Props) 
   return (
     <section aria-label="Route map" className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-ink/5">
       <div ref={box} className="h-72 w-full lg:h-[30rem]" />
-      {results && (
+      {routes && !passes && <p className="px-4 py-3 text-xs text-ink-2">Pick a departure time to see the route coloured by sunny side.</p>}
+      {routes && passes && (
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 py-3 text-xs text-ink-2">
           {CATEGORIES.map((c) => (
             <li key={c.category} className="flex items-center gap-1.5">
@@ -172,7 +178,7 @@ export function RouteMap({ results, selected, places, clock, onSelect }: Props) 
               {c.name}
             </li>
           ))}
-          {results.length > 1 && (
+          {routes.length > 1 && (
             <li className="flex items-center gap-1.5">
               <span aria-hidden className="h-1 w-4 rounded-full bg-muted opacity-70" />
               Other routes (click to switch)

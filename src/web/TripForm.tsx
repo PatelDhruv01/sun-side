@@ -7,9 +7,13 @@ export interface TripInput {
   to: PlaceField;
   vias: PlaceField[];
   date: string;
+  /** 'at' leaves at `time`; 'day' isn't sure yet, so it works out the whole day. */
+  when: 'at' | 'day';
   time: string;
   /** Arrival time from the ticket as HH:MM, or '' when not known. */
   arrive: string;
+  /** For the whole day: how long the trip takes, in hours, or '' for a typical trip. */
+  hours: string;
   vehicle: Vehicle;
 }
 
@@ -25,10 +29,39 @@ const LABEL = 'mb-1 block text-sm font-medium text-ink-2';
 const INPUT = 'w-full rounded-lg border border-hairline bg-page px-3 py-2.5 text-base outline-none focus:border-ink-2';
 const LINK = 'underline decoration-axis underline-offset-4 hover:text-ink';
 
+/** Two or more choices as one segmented control. */
+function Segmented<T extends string>({ legend, name, options, value, onChange }: {
+  legend: string;
+  name: string;
+  options: [T, string][];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className={LABEL}>{legend}</legend>
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-page p-1">
+        {options.map(([option, label]) => (
+          <label
+            key={option}
+            className={`cursor-pointer rounded-md py-2 text-center text-sm font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ink-2 ${
+              value === option ? 'bg-surface text-ink shadow-sm' : 'text-ink-2'
+            }`}
+          >
+            <input type="radio" name={name} value={option} checked={value === option} onChange={() => onChange(option)} className="sr-only" />
+            {label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) {
   const set = (patch: Partial<TripInput>) => onChange({ ...value, ...patch });
   const middle = value.from.place && value.to.place ? lerp(value.from.place.position, value.to.place.position, 0.5) : undefined;
-  const ready = value.from.text.trim() !== '' && value.to.text.trim() !== '' && value.date !== '' && value.time !== '';
+  const ready =
+    value.from.text.trim() !== '' && value.to.text.trim() !== '' && value.date !== '' && (value.when === 'day' || value.time !== '');
 
   return (
     <form
@@ -67,50 +100,73 @@ export function TripForm({ value, onChange, onSubmit, onExample, busy }: Props) 
         </button>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3">
+      <div className="mt-5">
+        <Segmented
+          legend="When"
+          name="when"
+          options={[
+            ['at', 'At a set time'],
+            ['day', 'Not sure yet'],
+          ]}
+          value={value.when}
+          onChange={(when) => set({ when })}
+        />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
           <label htmlFor="trip-date" className={LABEL}>
             Date
           </label>
           <input id="trip-date" type="date" required value={value.date} onChange={(e) => set({ date: e.target.value })} className={INPUT} />
         </div>
-        <div>
-          <label htmlFor="trip-time" className={LABEL}>
-            Leaves at
-          </label>
-          <input id="trip-time" type="time" required value={value.time} onChange={(e) => set({ time: e.target.value })} className={INPUT} />
-        </div>
-        <div className="col-span-2">
-          <label htmlFor="trip-arrive" className={LABEL}>
-            Arrives at <span className="font-normal text-muted">optional, from your ticket</span>
-          </label>
-          <input id="trip-arrive" type="time" value={value.arrive} onChange={(e) => set({ arrive: e.target.value })} className={INPUT} />
-        </div>
+        {value.when === 'at' ? (
+          <>
+            <div>
+              <label htmlFor="trip-time" className={LABEL}>
+                Leaves at
+              </label>
+              <input id="trip-time" type="time" required value={value.time} onChange={(e) => set({ time: e.target.value })} className={INPUT} />
+            </div>
+            <div className="col-span-2">
+              <label htmlFor="trip-arrive" className={LABEL}>
+                Arrives at <span className="font-normal text-muted">optional, from your ticket</span>
+              </label>
+              <input id="trip-arrive" type="time" value={value.arrive} onChange={(e) => set({ arrive: e.target.value })} className={INPUT} />
+            </div>
+          </>
+        ) : (
+          <div>
+            <label htmlFor="trip-hours" className={LABEL}>
+              Takes, hours <span className="font-normal text-muted">optional</span>
+            </label>
+            <input
+              id="trip-hours"
+              type="number"
+              inputMode="decimal"
+              min="0.25"
+              step="0.25"
+              placeholder="e.g. 2.5"
+              value={value.hours}
+              onChange={(e) => set({ hours: e.target.value })}
+              className={INPUT}
+            />
+          </div>
+        )}
       </div>
 
-      <fieldset className="mt-5">
-        <legend className={LABEL}>Going by</legend>
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-page p-1">
-          {(['bus', 'car'] as const).map((vehicle) => (
-            <label
-              key={vehicle}
-              className={`cursor-pointer rounded-md py-2 text-center text-sm font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ink-2 ${
-                value.vehicle === vehicle ? 'bg-surface text-ink shadow-sm' : 'text-ink-2'
-              }`}
-            >
-              <input
-                type="radio"
-                name="vehicle"
-                value={vehicle}
-                checked={value.vehicle === vehicle}
-                onChange={() => set({ vehicle })}
-                className="sr-only"
-              />
-              {vehicle === 'bus' ? 'Bus' : 'Car'}
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <div className="mt-5">
+        <Segmented
+          legend="Going by"
+          name="vehicle"
+          options={[
+            ['bus', 'Bus'],
+            ['car', 'Car'],
+          ]}
+          value={value.vehicle}
+          onChange={(vehicle) => set({ vehicle })}
+        />
+      </div>
 
       <button
         type="submit"

@@ -22,7 +22,7 @@ test('agreement between the verdicts for several routes', () => {
 test('the answer can flip if the bus leaves earlier or later', () => {
   // three hours due north: in the morning the sun is on the right, in the afternoon on the left
   const route = road(MUMBAI, [[0, 180]]);
-  const shifts = shiftedVerdicts(route, ist('2026-11-05T11:00'), 1, {}, [-120, 120]);
+  const shifts = shiftedVerdicts(route, { departure: ist('2026-11-05T11:00'), timeScale: 1 }, [-120, 120]);
   assert.deepEqual(shifts, [
     { shift: -120, sit: 'left' },
     { shift: 120, sit: 'right' },

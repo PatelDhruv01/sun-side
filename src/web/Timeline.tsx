@@ -4,6 +4,7 @@ import type { RouteResult } from '../app/plan.ts';
 import { timelineRows } from '../app/rows.ts';
 import { compass } from '../engine/geo.ts';
 import type { TimelineBin } from '../engine/types.ts';
+import { weatherAt, type Weather } from '../engine/weather.ts';
 import { useWidth } from './hooks.ts';
 
 const Y_MAX = 700; // W/m²: a side window gets at most about 660 under a clear sky
@@ -23,7 +24,7 @@ const LANES = [
 ] as const;
 
 /** Direct sun on each side window over the trip, with a crosshair and a table view. */
-export function Timeline({ result, clock }: { result: RouteResult; clock: ClockFormat }) {
+export function Timeline({ result, clock, weather }: { result: RouteResult; clock: ClockFormat; weather: Weather | null }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
   const [hover, setHover] = useState<number | null>(null);
@@ -64,6 +65,7 @@ export function Timeline({ result, clock }: { result: RouteResult; clock: ClockF
   };
 
   const shown = hover === null ? null : bins[hover];
+  const sky = shown && weather ? weatherAt(weather, shown.position, middle(shown)) : undefined;
   const crossX = shown ? x(middle(shown)) : 0;
   const tipLeft = crossX + 12 + TIP_WIDTH <= width ? crossX + 12 : Math.max(0, crossX - 12 - TIP_WIDTH);
 
@@ -184,6 +186,11 @@ export function Timeline({ result, clock }: { result: RouteResult; clock: ClockF
               {shown.sun.elevation > 0 ? `Sun ${compass(shown.sun.azimuth)}, ${Math.round(shown.sun.elevation)}° high` : 'Sun below the horizon'} · road heads{' '}
               {compass(shown.heading)}
             </p>
+            {sky && (
+              <p className="mt-0.5 text-ink-2">
+                Cloud {Math.round(sky.cloud)}% · {Math.round(sky.temperature)} °C
+              </p>
+            )}
           </div>
         )}
       </div>

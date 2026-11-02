@@ -2,6 +2,8 @@
 import { otherSide, type Decision, type SeatSide } from '../engine/decide.ts';
 import { agreement, type Shifted } from '../engine/evaluate.ts';
 import type { TripStats } from '../engine/summary.ts';
+import type { Band } from '../engine/sweep.ts';
+import type { TripWeather } from '../engine/weather.ts';
 
 /** Shows a clock time (ms since epoch) the way the reader expects, e.g. "09:00" or "06:10 +1". */
 export type ClockFormat = (time: number) => string;
@@ -14,7 +16,10 @@ export interface Explanation {
   heat: string;
 }
 
-export function explain(d: Decision, stats: TripStats, clock: ClockFormat): Explanation {
+/** Below this, in °C all the way, some people would rather sit in the sun. */
+const COOL = 18;
+
+export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weather?: TripWeather): Explanation {
   const reasons: string[] = [];
   const bothSides = () => `${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`;
   let headline: string;
@@ -68,8 +73,40 @@ export function explain(d: Decision, stats: TripStats, clock: ClockFormat): Expl
   if (d.avoidRows) {
     tips.push(`Tip: a lot of sun comes through the ${d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows'}.`);
   }
+  if (weather && d.sit !== 'either' && weather.maxTemperature < COOL) {
+    tips.push(`It'll be cool, ${temperatures(weather)}: if you'd rather sit in the sun, take the ${otherSide(d.sit).toUpperCase()} side.`);
+  }
   return { headline, reasons, tips, heat: `Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.` };
 }
+
+/** The forecast along the trip in a sentence, e.g. "Forecast: clear skies, 24–31 °C." */
+export function weatherSentence(weather: TripWeather): string {
+  const cloud = Math.round(weather.cloud);
+  const sky =
+    cloud >= 60
+      ? `mostly cloudy (${cloud}% cover), so there's less sun to dodge`
+      : cloud >= 20
+        ? `some cloud (${cloud}% cover on average)`
+        : weather.clearness < 0.7
+          ? 'clear but hazy, which takes the edge off the sun'
+          : 'clear skies';
+  return `Forecast: ${sky}, ${temperatures(weather)}.`;
+}
+
+const temperatures = ({ minTemperature, maxTemperature }: TripWeather) => {
+  const [low, high] = [Math.round(minTemperature), Math.round(maxTemperature)];
+  return low === high ? `about ${low} °C` : `${low}–${high} °C`;
+};
+
+/** A run of departures in words: "sit LEFT", "either side: after dark", and so on. */
+export function bandLabel(band: Band): string {
+  if (band.sit !== 'either') return `sit ${band.sit.toUpperCase()}${band.slight ? ' (slightly)' : ''}`;
+  if (band.reason === 'dark') return 'either side: after dark';
+  return band.reason === 'little sun' ? 'either side: little sun' : 'either side: about even';
+}
+
+/** A run's departure times, e.g. "07:00–12:30", or one time for a single departure. */
+export const bandTimes = (band: Band, clock: ClockFormat) => (band.from === band.to ? clock(band.from) : `${clock(band.from)}–${clock(band.to)}`);
 
 /** E.g. "the right side gets sun for 1h 01m (all in one unbroken stretch from 09:00)". */
 export function sunStory(side: SeatSide, stats: TripStats, clock: ClockFormat): string {

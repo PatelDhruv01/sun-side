@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { departureSummary, duration as hm, explain, routesSummary, verdictLabel } from '../app/explain.ts';
-import { departureShifts, planTrip, type RouteResult } from '../app/plan.ts';
+import { bandLabel, bandTimes, departureSummary, duration as hm, explain, routesSummary, verdictLabel, weatherSentence } from '../app/explain.ts';
+import { departureShifts, planAt, planDay, prepareTrip, type DayPlan, type RouteResult, type TripContext } from '../app/plan.ts';
 import { timelineRows } from '../app/rows.ts';
 import { CATEGORY_COLOURS, stretches } from '../app/stretches.ts';
 import type { Decision, ScoringOptions } from '../engine/decide.ts';
@@ -14,6 +14,7 @@ import { compass, distance, lerp } from '../engine/geo.ts';
 import { SUN_THRESHOLD, type TripStats } from '../engine/summary.ts';
 import type { Timing, Vehicle } from '../engine/timing.ts';
 import type { Faces, LonLat, Side, TimelineBin } from '../engine/types.ts';
+import { tripWeather, type TripWeather } from '../engine/weather.ts';
 import { searchPlaces, type Place } from '../services/geocode.ts';
 import type { FetchJson } from '../services/http.ts';
 
@@ -24,8 +25,10 @@ const USAGE = `Usage: npm run trip -- --from <place> --to <place> --depart <time
 
   --from, --to   a place name ("Swargate, Pune") or "lat,lon" as Google Maps shows it
   --via          a town the bus goes through, to pin the route (repeat for more)
-  --depart       "YYYY-MM-DD HH:MM", "HH:MM" (today) or "now"
+  --depart       "YYYY-MM-DD HH:MM", "HH:MM" (today) or "now"; a date alone ("YYYY-MM-DD")
+                 works out every departure that day, for when you're not sure yet
   --arrive       arrival time from your ticket; stretches the timeline to fit
+  --hours        with a date alone: how long the trip takes, in hours
   --vehicle      bus (default) or car: sets a typical trip time when --arrive isn't given
   --scale        or stretch by hand: 1.3 = 30% slower than the free-flowing car time
   --route        which of the routes found to show in detail (default 1, the quickest)
@@ -33,7 +36,8 @@ const USAGE = `Usage: npm run trip -- --from <place> --to <place> --depart <time
   --every        minutes per row of the printed timeline (default 10)
   --continuity   how much long unbroken sun matters: 1 = only the total, 2 = default, 3 = a lot
   --cool-down    minutes to cool off once out of the sun (default 15)
-  --refresh      ignore cached lookups`;
+  --no-weather   assume a clear sky instead of using the forecast
+  --refresh      ignore cached lookups (forecasts included)`;
 
 /** How the command line tells you to pin or pick a route. */
 const HINTS = { pin: 'pin it with --via', pick: 'show the one your bus takes with --route' };
@@ -57,6 +61,7 @@ async function main() {
       via: { type: 'string', multiple: true },
       depart: { type: 'string' },
       arrive: { type: 'string' },
+      hours: { type: 'string' },
       vehicle: { type: 'string', default: 'bus' },
       scale: { type: 'string' },
       route: { type: 'string', default: '1' },
@@ -64,6 +69,7 @@ async function main() {
       every: { type: 'string', default: '10' },
       continuity: { type: 'string', default: '2' },
       'cool-down': { type: 'string', default: '15' },
+      'no-weather': { type: 'boolean', default: false },
       refresh: { type: 'boolean', default: false },
     },
   });
@@ -74,15 +80,19 @@ async function main() {
   }
 
   const offset = parseOffset(values.tz);
-  const departure = parseTime(values.depart, offset);
+  const vehicle = parseVehicle(values.vehicle);
+  const scoring = readScoring(values.continuity, values['cool-down']);
+  const wholeDay = /^\d{4}-\d{2}-\d{2}$/.test(values.depart.trim()); // a date alone: not sure when yet
+  const departure = parseTime(wholeDay ? `${values.depart.trim()} 00:00` : values.depart, offset);
   const timing: Timing = {
     departure,
-    vehicle: parseVehicle(values.vehicle),
-    arrival: values.arrive ? parseTime(values.arrive, offset, departure) : undefined,
+    vehicle,
+    arrival: values.arrive && !wholeDay ? parseTime(values.arrive, offset, departure) : undefined,
     scale: values.scale ? Number(values.scale) : undefined,
   };
   if (timing.scale !== undefined && !(timing.scale > 0)) throw new Error('--scale must be a positive number.');
-  const scoring = readScoring(values.continuity, values['cool-down']);
+  const hours = values.hours ? Number(values.hours) : undefined;
+  if (hours !== undefined && !(hours > 0)) throw new Error('--hours must be a positive number.');
 
   const fetchJson = cachedFetch(values.refresh);
   const from = await findPlace(values.from, fetchJson);
@@ -90,19 +100,28 @@ async function main() {
   const middle = lerp(from.place.position, to.place.position, 0.5);
   const vias: Found[] = [];
   for (const via of values.via ?? []) vias.push(await findPlace(via, fetchJson, middle));
-  const { results, notes } = await planTrip([from, ...vias, to].map((f) => f.place.position), timing, scoring, fetchJson);
+  const points = [from, ...vias, to].map((f) => f.place.position);
+  const window = { from: departure, to: wholeDay ? departure + 86_400_000 : departure };
+  const context = await prepareTrip(points, window, { fetchJson, weather: !values['no-weather'] });
 
   const pick = Number(values.route) - 1;
-  if (!Number.isInteger(pick) || pick < 0 || pick >= results.length) {
-    throw new Error(`--route must be a number from 1 to ${results.length}.`);
+  if (!Number.isInteger(pick) || pick < 0 || pick >= context.routes.length) {
+    throw new Error(`--route must be a number from 1 to ${context.routes.length}.`);
   }
-  const chosen = results[pick];
   const clock: Clock = { offset, departure };
+  if (wholeDay) {
+    printPlaces(from, vias, to);
+    printDay(context, planDay(context, pick, { start: departure, vehicle, hours }, scoring), pick, vehicle, hours, clock);
+    return;
+  }
 
+  const results = planAt(context, timing, scoring);
+  const chosen = results[pick];
+  const weather = context.weather ? tripWeather(context.weather, chosen.bins) : undefined;
   printPlaces(from, vias, to);
-  printTrip(chosen, pick, results.length, timing.vehicle, clock);
-  printVerdict(chosen.decision, chosen.stats, clock);
-  printChecks(results, pick, departureShifts(chosen, timing, scoring), notes, vias.length > 0);
+  printTrip(chosen, pick, results.length, timing.vehicle, clock, weather);
+  printVerdict(chosen.decision, chosen.stats, clock, weather);
+  printChecks(results, pick, departureShifts(context, chosen, timing, scoring), context.notes, vias.length > 0);
   printSides(chosen.stats, chosen.decision, clock);
   printTimeline(chosen.bins, Math.max(1, Number(values.every) || 10), clock);
   const files = await writeOutputs(from.place, to.place, results, pick, clock);
@@ -215,7 +234,7 @@ function printPlaces(from: Found, vias: Found[], to: Found) {
   show('To', to);
 }
 
-function printTrip({ route, stretch, stats }: RouteResult, pick: number, count: number, vehicle: Vehicle, clock: Clock) {
+function printTrip({ route, stretch, stats }: RouteResult, pick: number, count: number, vehicle: Vehicle, clock: Clock, weather?: TripWeather) {
   const which = count > 1 ? `, route ${pick + 1} of ${count}` : '';
   console.log(`Road  ${(route.distance / 1000).toFixed(0)} km ${route.label}${which}; ${hm(total(route.segmentDurations) / 60)} in free-flowing traffic`);
   const basis =
@@ -227,10 +246,26 @@ function printTrip({ route, stretch, stats }: RouteResult, pick: number, count: 
   const end = clock.departure + stats.minutes * 60_000;
   console.log(`When  ${dayName(clock.departure, clock.offset)}, ${hhmm(clock.departure, clock)} → ${hhmm(end, clock)} ${zone(clock.offset)} (${basis})`);
   console.log(`      ${hm(stats.minutes)} on the road, ${hm(stats.daylightMinutes)} of it in daylight`);
+  console.log(`Sky   ${weather ? weatherSentence(weather) : 'Clear sky assumed.'}`);
 }
 
-function printVerdict(d: Decision, stats: TripStats, clock: Clock) {
-  const { headline, reasons, tips, heat } = explain(d, stats, (t) => hhmm(t, clock));
+/** "Not sure when I leave": the verdict for every departure across the day, as runs. */
+function printDay(context: TripContext, plan: DayPlan, pick: number, vehicle: Vehicle, hours: number | undefined, clock: Clock) {
+  const route = context.routes[pick];
+  const which = context.routes.length > 1 ? `, route ${pick + 1} of ${context.routes.length}` : '';
+  console.log(`Road  ${(route.distance / 1000).toFixed(0)} km ${route.label}${which}; ${hm(total(route.segmentDurations) / 60)} in free-flowing traffic`);
+  const basis = hours
+    ? `a ${hm(hours * 60)} trip`
+    : `a typical ${vehicle} trip, ${plan.stretch.scale}× the free-flowing time; give --hours to set the trip length`;
+  console.log(`Day   ${dayName(clock.departure, clock.offset)} ${zone(clock.offset)} (${basis})`);
+  console.log(`Sky   ${context.weather ? 'Using the forecast for the day.' : 'Clear sky assumed.'}`);
+  console.log('\nIf you leave at:');
+  for (const band of plan.bands) console.log(`  ${bandTimes(band, (t) => hhmm(t, clock)).padEnd(13)} ${bandLabel(band)}`);
+  for (const note of context.notes) console.log(`Note: ${note}`);
+}
+
+function printVerdict(d: Decision, stats: TripStats, clock: Clock, weather?: TripWeather) {
+  const { headline, reasons, tips, heat } = explain(d, stats, (t) => hhmm(t, clock), weather);
   console.log(`\nVERDICT  ${headline}`);
   for (const line of [...reasons, ...tips, heat]) console.log(`         ${line}`);
 }

@@ -1,6 +1,9 @@
-// Shared test helpers: synthetic roads, and fake OSRM/Valhalla answers built from them.
+// Shared test helpers: synthetic roads, and fake OSRM/Valhalla/Open-Meteo answers built from them.
 import { destination, distance } from '../src/engine/geo.ts';
+import { clearSkyDni } from '../src/engine/irradiance.ts';
+import { sunPosition } from '../src/engine/solar.ts';
 import type { LonLat, Route } from '../src/engine/types.ts';
+import { cellCentre, cellKey, type Weather, type WeatherCell } from '../src/engine/weather.ts';
 
 export const MUMBAI: LonLat = [72.88, 19.08];
 export const AHMEDABAD: LonLat = [72.57, 23.02];
@@ -49,6 +52,21 @@ export function valhallaTrip(coords: LonLat[], kmh: number, spans: [road: string
   maneuvers.push({ time: 0, length: 0, begin_shape_index: end, end_shape_index: end, street_names: [] }); // "you have arrived"
   const metres = sum(lengths);
   return { summary: { length: metres / 1000, time: metres / (kmh / 3.6) }, legs: [{ shape: encodePolyline6(coords), maneuvers }] };
+}
+
+/**
+ * A forecast for the squares the points fall in, hourly from `from` (on the hour, UTC): direct
+ * sunlight is the clear-sky value times `sky(time)` (1 = clear, 0 = overcast), at 25 °C.
+ */
+export function forecast(points: LonLat[], from: number, hours: number, sky: (time: number) => number = () => 1): Weather {
+  const times = Array.from({ length: hours }, (_, i) => from + i * 3_600_000);
+  const cells = new Map<string, WeatherCell>();
+  for (const point of points) {
+    const position = cellCentre(point);
+    const dni = times.map((t) => clearSkyDni(sunPosition(t, position[1], position[0]).elevation) * sky(t));
+    cells.set(cellKey(point), { position, dni, cloud: times.map((t) => Math.round((1 - sky(t)) * 100)), temperature: times.map(() => 25) });
+  }
+  return { times, cells };
 }
 
 /** Google's encoded-polyline format at 6 decimals, as Valhalla sends it. */

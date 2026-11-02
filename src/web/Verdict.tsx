@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { departureSummary, explain, routesSummary, type ClockFormat } from '../app/explain.ts';
-import { departureShifts, type RouteResult } from '../app/plan.ts';
+import { departureSummary, explain, routesSummary, weatherSentence, type ClockFormat } from '../app/explain.ts';
+import { departureShifts, type RouteResult, type TripContext } from '../app/plan.ts';
 import { otherSide } from '../engine/decide.ts';
 import type { Timing } from '../engine/timing.ts';
+import { tripWeather } from '../engine/weather.ts';
 import { SeatDiagram } from './SeatDiagram.tsx';
 import { dayLabel } from './time.ts';
 
@@ -10,19 +11,22 @@ import { dayLabel } from './time.ts';
 const HINTS = { pin: 'add a town it goes through', pick: 'pick the one your bus takes below' };
 
 interface Props {
+  context: TripContext;
   results: RouteResult[];
   selected: number;
   timing: Timing;
   clock: ClockFormat;
   pinned: boolean;
-  notes: string[];
+  /** When this departure was picked from the whole-day view, the way back to it. */
+  onBackToDay?: () => void;
 }
 
-export function Verdict({ results, selected, timing, clock, pinned, notes }: Props) {
+export function Verdict({ context, results, selected, timing, clock, pinned, onBackToDay }: Props) {
   const result = results[selected];
   const { decision, stats, stretch } = result;
-  const { headline, reasons, tips, heat } = explain(decision, stats, clock);
-  const shifts = useMemo(() => departureShifts(result, timing), [result, timing]);
+  const weather = useMemo(() => (context.weather ? tripWeather(context.weather, result.bins) : undefined), [context, result]);
+  const { headline, reasons, tips, heat } = explain(decision, stats, clock, weather);
+  const shifts = useMemo(() => departureShifts(context, result, timing), [context, result, timing]);
   const either = decision.sit === 'either';
   const end = timing.departure + stats.minutes * 60_000;
   const basis =
@@ -32,6 +36,11 @@ export function Verdict({ results, selected, timing, clock, pinned, notes }: Pro
 
   return (
     <section aria-labelledby="verdict" className="rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-ink/5">
+      {onBackToDay && (
+        <button type="button" onClick={onBackToDay} className="mb-3 text-sm text-ink-2 underline decoration-axis underline-offset-4 hover:text-ink">
+          ← The whole day
+        </button>
+      )}
       <div className="flex items-center gap-4">
         <SeatDiagram sit={decision.sit} sunny={either ? undefined : otherSide(decision.sit as 'left' | 'right')} />
         <div className="min-w-0">
@@ -66,9 +75,10 @@ export function Verdict({ results, selected, timing, clock, pinned, notes }: Pro
       )}
 
       <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-sm text-ink-2">
+        {weather && <p>{weatherSentence(weather)}</p>}
         <p>{routesSummary(results.map((r) => r.decision.sit), pinned, HINTS)}</p>
         <p>{departureSummary(decision.sit, shifts)}</p>
-        {notes.map((note) => (
+        {context.notes.map((note) => (
           <p key={note}>{note}</p>
         ))}
         <p className="text-xs text-muted">

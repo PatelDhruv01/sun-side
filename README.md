@@ -4,7 +4,7 @@ Which side of the bus or car should you sit on to avoid the sun? Instead of gues
 the direction of the destination, sun-side drives the real road minute by minute and works
 out how much direct sun comes through each window.
 
-**Status:** Step 4 of 6, a basic web page (plus the command-line test bench).
+**Status:** Step 5 of 6, weather and "not sure when I leave" (web page plus command-line test bench).
 
 ## Run it
 
@@ -18,21 +18,24 @@ npm run dev
 
 `npm run dev` serves the web page at http://localhost:5173: pick the places (suggestions come
 as you type), the date and times, bus or car, and it shows where to sit, a map of the route
-coloured by sunny side, and the sun on each side window over the trip. `npm run build` makes
-the static site in `dist/`.
+coloured by sunny side, and the sun on each side window over the trip. Choose **Not sure yet**
+instead of a time and it works out every departure that day ("leave 06:00–12:00: sit LEFT…");
+pick one for the full answer. `npm run build` makes the static site in `dist/`.
 
 The same engine runs from the command line, with more detail and knobs:
 
 ```bash
-npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-12-15 09:00" --arrive "11:00"
+npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-11-15 09:00" --arrive "11:00"
+npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-11-15" --hours 2
 ```
 
 | Option | Meaning |
 |---|---|
 | `--from`, `--to` | A place name (`"Swargate, Pune"`) or `"lat,lon"` as Google Maps shows it |
 | `--via` | A town the bus goes through, to pin the route (repeat for more) |
-| `--depart` | `"YYYY-MM-DD HH:MM"`, `"HH:MM"` (today) or `now` |
+| `--depart` | `"YYYY-MM-DD HH:MM"`, `"HH:MM"` (today) or `now`; a date alone works out every departure that day |
 | `--arrive` | Arrival time from your ticket: stretches the timeline to fit |
+| `--hours` | With a date alone: how long the trip takes |
 | `--vehicle` | `bus` (default) or `car`: a typical trip time when `--arrive` isn't given |
 | `--scale` | Or stretch by hand: `1.3` = 30% slower than the free-flowing car time |
 | `--route` | Which of the routes found to show in detail (default 1, the quickest) |
@@ -40,7 +43,8 @@ npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-12-15 09:00"
 | `--every` | Minutes per row of the printed timeline (default 10) |
 | `--continuity` | How much long unbroken sun matters: `1` = only the total, `2` = default, `3` = a lot |
 | `--cool-down` | Minutes to cool off once out of the sun (default 15) |
-| `--refresh` | Ignore cached route and place lookups |
+| `--no-weather` | Assume a clear sky instead of using the forecast |
+| `--refresh` | Ignore cached lookups, forecasts included |
 
 Each run prints a verdict (which side, how sure, and why), whether the other routes and a
 slightly earlier or later departure agree, the sun on each side, a timeline, and writes two
@@ -70,6 +74,11 @@ files to `out/`:
 5. **Sunlight:** clear-sky direct sunlight for that sun height, split onto the left, right,
    front and rear windows by the angle between the road and the sun. Windows are treated as
    vertical, so a high noon sun mostly lands on the roof.
+   **Weather** ([weather.ts](src/engine/weather.ts)): for dates up to about two weeks ahead,
+   Open-Meteo's hourly forecast for each 0.5° square (about 55 km) the routes cross. Each hour it
+   says how much of the clear-sky sun gets through (clouds, and haze, which takes 5–20% even on
+   clear days); that share scales the minute-by-minute clear-sky value, so a cloudy stretch counts
+   for less. Beyond the forecast, a clear sky.
 6. **Timeline:** segments are summed into one-minute bins.
 7. **Verdict** ([decide.ts](src/engine/decide.ts)): each window gets a "heat bucket" that sun
    fills and shade drains (15-minute cool-down). The heat score adds up how full the bucket
@@ -85,6 +94,9 @@ files to `out/`:
 8. **Checks** ([evaluate.ts](src/engine/evaluate.ts)): the verdict is worked out for every route
    found and for leaving 30 minutes early, 30 minutes late and an hour late, and the output says
    whether they agree.
+9. **Not sure when** ([sweep.ts](src/engine/sweep.ts)): the verdict for every departure that day,
+   half an hour apart, joined into runs that share one ("either side" split by why: after dark,
+   little sun, or about even).
 
 ## Layout
 
@@ -101,13 +113,14 @@ files to `out/`:
 
 Map data © OpenStreetMap contributors (ODbL); map tiles by OpenFreeMap (free, no key, no limits).
 Routing by the public OSRM and Valhalla servers (FOSSGIS), fair use only: at most 1 request a
-second, non-commercial. Place search by Photon (komoot) and Open-Meteo (GeoNames data). The
+second, non-commercial. Place search by Photon (komoot) and Open-Meteo (GeoNames data). Weather
+from Open-Meteo's forecast API (free for non-commercial use), one request per trip. The
 command line caches responses in `cache/`; the page fetches each URL once per visit and waits
 for a pause in typing before searching. A failed request is retried once.
 
 ## Known limits (for now)
 
-- Clear sky only; weather comes in Step 5.
+- The forecast reaches about two weeks ahead, in 0.5° squares; further out it's a clear sky.
 - Without a ticket time, the typical bus and car factors are rough guesses.
 - Stops along the way aren't modelled; their time is spread over the whole trip.
 - Alternatives depend on what the free engines return; often there is only one route, and
@@ -123,5 +136,5 @@ for a pause in typing before searching. A failed request is retried once.
 2. ~~Scoring: the "heat bucket" for unbroken vs broken sun, honest "doesn't matter" answers, seat switching~~
 3. ~~Route and timing: place search, via points, alternatives, ticket-time stretch~~
 4. ~~Basic web UI: inputs, map, verdict, timeline~~
-5. "Not sure when I leave" mode and weather (Open-Meteo)
+5. ~~"Not sure when I leave" mode and weather (Open-Meteo)~~
 6. Polish and free deploy: sharing, return trip, mobile/PWA

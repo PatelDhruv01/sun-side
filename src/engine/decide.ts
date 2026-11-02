@@ -8,6 +8,8 @@ export interface ScoringOptions {
   coolDown?: number;
   /** How much unbroken sun matters: 1 = only the total counts, 2 = default, 3 = a lot. */
   continuity?: number;
+  /** Look for a seat change (default true). It's the slow part, and checks that only need the side skip it. */
+  seatSwitch?: boolean;
 }
 
 export interface SeatSwitch {
@@ -96,7 +98,7 @@ export function decide(bins: TimelineBin[], options: ScoringOptions = {}): Decis
     decision.confidence = 'balanced';
     if (Math.abs(glare.left - glare.right) >= GLARE_GAP) decision.lessGlare = glare.left < glare.right ? 'left' : 'right';
   }
-  decision.switchSeats = bestSwitch(bins, minutes, { left, right }, params, heat[better]);
+  if (options.seatSwitch !== false) decision.switchSeats = bestSwitch(bins, minutes, { left, right }, params, heat[better]);
   return decision;
 }
 
