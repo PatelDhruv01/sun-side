@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { decide, otherSide, type Decision, type ScoringOptions, type SeatSide } from '../engine/decide.ts';
 import { compass, toDeg, toRad, wrap360 } from '../engine/geo.ts';
 import { simulate } from '../engine/simulate.ts';
 import { SUN_THRESHOLD, summarise, type TripStats } from '../engine/summary.ts';
@@ -23,6 +24,8 @@ const USAGE = `Usage: npm run trip -- --from <place> --to <place> --depart <time
   --scale        or stretch it by hand: 1.3 = 30% slower than a car
   --tz           UTC offset of the times you type (default +05:30, IST)
   --every        minutes per row of the printed timeline (default 10)
+  --continuity   how much long unbroken sun matters: 1 = only the total, 2 = default, 3 = a lot
+  --cool-down    minutes to cool off once out of the sun (default 15)
   --refresh      ignore cached route and place lookups`;
 
 interface Clock {
@@ -40,6 +43,8 @@ async function main() {
       scale: { type: 'string' },
       tz: { type: 'string', default: '+05:30' },
       every: { type: 'string', default: '10' },
+      continuity: { type: 'string', default: '2' },
+      'cool-down': { type: 'string', default: '15' },
       refresh: { type: 'boolean', default: false },
     },
   });
@@ -63,10 +68,12 @@ async function main() {
 
   const { passes, bins } = simulate(route, { departure, timeScale });
   const stats = summarise(bins);
+  const decision = decide(bins, readScoring(values.continuity, values['cool-down']));
   const clock: Clock = { offset, departure };
 
   printHeader(from, to, route, carSeconds, timeScale, Boolean(values.arrive), stats, clock);
-  printSides(stats, clock);
+  printVerdict(decision, stats, clock);
+  printSides(stats, decision, clock);
   printTimeline(bins, Math.max(1, Number(values.every) || 10), clock);
   const files = await writeOutputs(from, to, route, passes, bins, clock);
   console.log(`\nFull 1-minute data: ${files[0]}`);
@@ -112,6 +119,13 @@ async function resolvePlace(input: string, fetchJson: FetchJson): Promise<Place>
   return geocode(input, fetchJson);
 }
 
+function readScoring(continuity: string, coolDown: string): ScoringOptions {
+  const options = { continuity: Number(continuity), coolDown: Number(coolDown) };
+  if (!(options.continuity >= 1)) throw new Error('--continuity must be 1 or more.');
+  if (!(options.coolDown > 0)) throw new Error('--cool-down must be more than 0 minutes.');
+  return options;
+}
+
 function parseOffset(tz: string): number {
   const match = /^([+-])(\d{1,2}):?(\d{2})$/.exec(tz);
   if (!match) throw new Error(`Can't read --tz "${tz}"; expected something like +05:30.`);
@@ -154,29 +168,87 @@ function printHeader(from: Place, to: Place, route: RoutedTrip, carSeconds: numb
     `: ${hm(stats.minutes)} on the road, ${hm(stats.daylightMinutes)} of it in daylight`);
 }
 
-function printSides(stats: TripStats, clock: Clock) {
-  console.log(`\nDirect sun on each side (clear sky; "sun" = at least ${SUN_THRESHOLD} W/m² on that window)`);
-  console.log('          sun time   longest unbroken      energy per m² of window');
-  for (const side of SIDES) {
-    const s = stats.sides[side];
-    const stretch = s.longestStart === undefined ? '-' : `${hm(s.longestMinutes)} from ${hhmm(s.longestStart, clock)}`;
-    const label = side[0].toUpperCase() + side.slice(1);
-    console.log(`  ${label.padEnd(6)}  ${hm(s.sunMinutes).padStart(7)}    ${stretch.padEnd(20)}  ${(s.energy / 1000).toFixed(2)} kWh`);
+function printVerdict(d: Decision, stats: TripStats, clock: Clock) {
+  const lines: string[] = [];
+  if (d.sit === 'either') {
+    if (stats.daylightMinutes < 1) {
+      lines.push('Either side: the whole trip is after dark.');
+    } else if (d.confidence === 'little sun') {
+      lines.push('Either side: not much sun reaches the side windows.');
+      lines.push(
+        stats.daylightMinutes < stats.minutes / 4
+          ? 'Most of the trip is in the dark.'
+          : d.avoidRows
+            ? 'The sun is mostly ahead of or behind you.'
+            : 'The sun is weak or high overhead most of the way.',
+      );
+      if (stats.sides.left.sunMinutes >= 1 || stats.sides.right.sunMinutes >= 1) {
+        lines.push(`${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`);
+      }
+    } else {
+      lines.push('Either side: both get about the same sun.');
+      lines.push(`${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`);
+    }
+  } else {
+    const worse = otherSide(d.sit);
+    lines.push(`Sit on the ${d.sit.toUpperCase()} side${d.confidence === 'slight' ? ' (only slightly better)' : ''}.`);
+    lines.push(`${capitalise(sunStory(worse, stats, clock))}; ${sunStory(d.sit, stats, clock)}.`);
+    const chosen = stats.sides[d.sit];
+    const rejected = stats.sides[worse];
+    if (chosen.energy > rejected.energy) {
+      lines.push(
+        chosen.longestMinutes < rejected.longestMinutes
+          ? `The ${d.sit} side gets more sun in total, but in shorter bursts; a long unbroken stretch like the ${worse} side's is more tiring.`
+          : `The ${d.sit} side gets more sun in total, but weaker; the ${worse} side's sun is more intense.`,
+      );
+    }
   }
-  console.log(`\n${rawComparison(stats)}`);
+  if (d.lessGlare) {
+    const glary = otherSide(d.lessGlare);
+    lines.push(
+      `If anything, sit on the ${d.lessGlare.toUpperCase()}: the ${glary} side gets more low sun straight in your eyes ` +
+        `(${hm(d.glare[glary])} vs ${hm(d.glare[d.lessGlare])}).`,
+    );
+  }
+  if (d.switchSeats) {
+    const s = d.switchSeats;
+    lines.push(
+      `If you can change seats: start on the ${s.from.toUpperCase()}, move to the ${s.to.toUpperCase()} at about ` +
+        `${hhmm(s.at, clock)} (km ${Math.round(s.distance / 1000)}). That cuts the sun you feel by ${Math.round(s.saving * 100)}%.`,
+    );
+  }
+  if (d.avoidRows) {
+    lines.push(`Tip: a lot of sun comes through the ${d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows'}.`);
+  }
+  lines.push(`Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.`);
+
+  console.log(`\nVERDICT  ${lines[0]}`);
+  for (const line of lines.slice(1)) console.log(`         ${line}`);
 }
 
-function rawComparison({ sides: { left, right } }: TripStats): string {
-  const leftMore = left.energy >= right.energy;
-  const [more, less] = leftMore ? [left, right] : [right, left];
-  if (more.energy < 50) return 'Raw comparison: hardly any direct sun on either side.';
-  const share =
-    less.energy < 1
-      ? 'all of the side sun'
-      : more.energy > 10 * less.energy
-        ? 'almost all of the side sun'
-        : `${(more.energy / less.energy).toFixed(1)}× the sun energy of the ${leftMore ? 'right' : 'left'}`;
-  return `Raw comparison: the ${leftMore ? 'LEFT' : 'RIGHT'} side gets ${share}.\n(Raw totals only; the real decision rules come in Step 2.)`;
+/** E.g. "the right side gets sun for 1h 01m (all in one unbroken stretch from 09:00)". */
+function sunStory(side: SeatSide, stats: TripStats, clock: Clock): string {
+  const s = stats.sides[side];
+  if (s.longestStart === undefined || s.sunMinutes < 1) return `the ${side} side gets almost no direct sun`;
+  const stretch = s.longestMinutes >= s.sunMinutes - 0.5 ? 'all in one unbroken stretch' : `longest unbroken stretch ${hm(s.longestMinutes)}`;
+  return `the ${side} side gets sun for ${hm(s.sunMinutes)} (${stretch} from ${hhmm(s.longestStart, clock)})`;
+}
+
+const capitalise = (text: string) => text[0].toUpperCase() + text.slice(1);
+
+function printSides(stats: TripStats, decision: Decision, clock: Clock) {
+  console.log(`\nDirect sun on each side (clear sky; "sun" = at least ${SUN_THRESHOLD} W/m² on that window)`);
+  console.log('          sun time   longest unbroken      energy per m²   heat score');
+  for (const side of SIDES) {
+    const s = stats.sides[side];
+    const stretch =
+      s.longestStart === undefined || s.sunMinutes < 1 ? '-' : `${hm(s.longestMinutes)} from ${hhmm(s.longestStart, clock)}`;
+    const label = side[0].toUpperCase() + side.slice(1);
+    console.log(
+      `  ${label.padEnd(6)}  ${hm(s.sunMinutes).padStart(7)}    ${stretch.padEnd(20)}  ${(s.energy / 1000).toFixed(2)} kWh      ${num(decision.heat[side], 4)}`,
+    );
+  }
+  console.log('  (heat score: minutes of strong sun, weighted up for long unbroken stretches)');
 }
 
 function printTimeline(bins: TimelineBin[], every: number, clock: Clock) {

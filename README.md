@@ -4,7 +4,7 @@ Which side of the bus or car should you sit on to avoid the sun? Instead of gues
 the direction of the destination, sun-side drives the real road minute by minute and works
 out how much direct sun comes through each window.
 
-**Status:** Step 1 of 6, the sun engine (command line only, no UI yet).
+**Status:** Step 2 of 6, scoring and verdicts (command line only, no UI yet).
 
 ## Run it
 
@@ -24,9 +24,12 @@ npm run trip -- --from "Mumbai" --to "Pune" --depart "2026-11-05 07:00"
 | `--scale` | Or stretch it by hand: `1.3` = 30% slower than a car |
 | `--tz` | UTC offset of the times you type (default `+05:30`, IST) |
 | `--every` | Minutes per row of the printed timeline (default 10) |
+| `--continuity` | How much long unbroken sun matters: `1` = only the total, `2` = default, `3` = a lot |
+| `--cool-down` | Minutes to cool off once out of the sun (default 15) |
 | `--refresh` | Ignore cached route and place lookups |
 
-Each run prints the sun on each side, a timeline, and writes two files to `out/`:
+Each run prints a verdict (which side, how sure, and why), the sun on each side, a timeline,
+and writes two files to `out/`:
 
 - a `.csv` with one row per minute (time, position, heading, sun direction and height, W/m² on each face)
 - a `.geojson` map: drop it on [geojson.io](https://geojson.io) to see the route coloured by sunny side
@@ -43,6 +46,17 @@ Each run prints the sun on each side, a timeline, and writes two files to `out/`
    front and rear windows by the angle between the road and the sun. Windows are treated as
    vertical, so a high noon sun mostly lands on the roof.
 5. **Timeline:** segments are summed into one-minute bins.
+6. **Verdict** ([decide.ts](src/engine/decide.ts)): each window gets a "heat bucket" that sun
+   fills and shade drains (15-minute cool-down). The heat score adds up how full the bucket
+   is, squared, so one long unbroken stretch counts for more than the same sun in short
+   bursts: 60 unbroken minutes score like about 95 minutes in 10-minute bursts. Then:
+   - the side with the lower score wins: "clear" if the other is at least twice as bad and
+     about 20 strong-sun minutes worse, otherwise "only slightly better";
+   - within 15% of each other is "either", with a lean to the side with less low sun in
+     your eyes (glare) when that differs by 10+ minutes;
+   - very little heat on both sides is "either" too;
+   - a single seat change is suggested when it cuts the heat by at least 25%;
+   - a rows tip appears when the windscreen or rear window gets a lot of sun.
 
 ## Layout
 
@@ -65,12 +79,12 @@ Responses are cached in `cache/` so re-runs don't hit the servers again.
 - Car timings unless you give `--arrive` or `--scale`.
 - One route, no via points or alternatives yet (Step 3).
 - No shade from hills, buildings or trees.
-- The "raw comparison" is just total energy; the real decision rules come in Step 2.
+- The scoring thresholds are first guesses, to be tuned on real trips.
 
 ## Roadmap
 
-1. ~~Sun engine~~ (this step)
-2. Scoring: the "heat bucket" for unbroken vs broken sun, honest "doesn't matter" answers, seat switching
+1. ~~Sun engine~~
+2. ~~Scoring: the "heat bucket" for unbroken vs broken sun, honest "doesn't matter" answers, seat switching~~
 3. Route and timing: place search, via points, alternatives, ticket-time stretch
 4. Basic web UI: inputs, map, verdict, timeline
 5. "Not sure when I leave" mode and weather (Open-Meteo)
