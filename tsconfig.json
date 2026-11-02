@@ -1,0 +1,16 @@
+{
+  // Node runs the .ts files directly (type stripping), so tsc is only a type checker.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
