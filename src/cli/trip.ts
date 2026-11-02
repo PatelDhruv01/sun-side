@@ -1,17 +1,18 @@
-// Step 1 test bench: simulate one trip and print the sun on each side of the vehicle.
-//   npm run trip -- --from "Mumbai" --to "Pune" --depart "2026-11-05 07:00"
+// Test bench for the engine: find the routes for a trip, then say where to sit and why.
+//   npm run trip -- --from "Ahmedabad" --to "Himatnagar" --depart "2026-12-15 09:00"
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { decide, otherSide, type Decision, type ScoringOptions, type SeatSide } from '../engine/decide.ts';
-import { compass, toDeg, toRad, wrap360 } from '../engine/geo.ts';
-import { simulate } from '../engine/simulate.ts';
-import { SUN_THRESHOLD, summarise, type TripStats } from '../engine/summary.ts';
+import { otherSide, type Decision, type ScoringOptions, type SeatSide } from '../engine/decide.ts';
+import { agreement, evaluate, shiftedVerdicts, type Evaluation, type Shifted } from '../engine/evaluate.ts';
+import { compass, distance, lerp, toDeg, toRad, wrap360 } from '../engine/geo.ts';
+import { SUN_THRESHOLD, type TripStats } from '../engine/summary.ts';
+import { timeScale, type TimeScale, type Vehicle } from '../engine/timing.ts';
 import type { Faces, LonLat, SegmentPass, Side, TimelineBin } from '../engine/types.ts';
-import { geocode, type Place } from '../services/geocode.ts';
+import { searchPlaces, type Place } from '../services/geocode.ts';
 import type { FetchJson } from '../services/http.ts';
-import { fetchRoutes, type RoutedTrip } from '../services/osrm.ts';
+import { findRoutes, type CandidateRoute } from '../services/routing.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const USER_AGENT = 'sun-side/0.1 (personal prototype)';
@@ -19,18 +20,33 @@ const USER_AGENT = 'sun-side/0.1 (personal prototype)';
 const USAGE = `Usage: npm run trip -- --from <place> --to <place> --depart <time> [options]
 
   --from, --to   a place name ("Swargate, Pune") or "lat,lon" as Google Maps shows it
+  --via          a town the bus goes through, to pin the route (repeat for more)
   --depart       "YYYY-MM-DD HH:MM", "HH:MM" (today) or "now"
   --arrive       arrival time from your ticket; stretches the timeline to fit
-  --scale        or stretch it by hand: 1.3 = 30% slower than a car
+  --vehicle      bus (default) or car: sets a typical trip time when --arrive isn't given
+  --scale        or stretch by hand: 1.3 = 30% slower than the free-flowing car time
+  --route        which of the routes found to show in detail (default 1, the quickest)
   --tz           UTC offset of the times you type (default +05:30, IST)
   --every        minutes per row of the printed timeline (default 10)
   --continuity   how much long unbroken sun matters: 1 = only the total, 2 = default, 3 = a lot
   --cool-down    minutes to cool off once out of the sun (default 15)
-  --refresh      ignore cached route and place lookups`;
+  --refresh      ignore cached lookups`;
 
 interface Clock {
   offset: number; // minutes east of UTC
   departure: number;
+}
+
+/** A place someone typed, plus far-away matches worth a mention in case the wrong one was picked. */
+interface Found {
+  place: Place;
+  others: Place[];
+}
+
+/** One candidate route, simulated and decided. */
+interface Result extends Evaluation {
+  route: CandidateRoute;
+  stretch: TimeScale;
 }
 
 async function main() {
@@ -38,9 +54,12 @@ async function main() {
     options: {
       from: { type: 'string' },
       to: { type: 'string' },
+      via: { type: 'string', multiple: true },
       depart: { type: 'string' },
       arrive: { type: 'string' },
+      vehicle: { type: 'string', default: 'bus' },
       scale: { type: 'string' },
+      route: { type: 'string', default: '1' },
       tz: { type: 'string', default: '+05:30' },
       every: { type: 'string', default: '10' },
       continuity: { type: 'string', default: '2' },
@@ -56,30 +75,46 @@ async function main() {
 
   const offset = parseOffset(values.tz);
   const fetchJson = cachedFetch(values.refresh);
-  const from = await resolvePlace(values.from, fetchJson);
-  const to = await resolvePlace(values.to, fetchJson);
-  const [route] = await fetchRoutes([from.position, to.position], { fetchJson });
+  const from = await findPlace(values.from, fetchJson);
+  const to = await findPlace(values.to, fetchJson);
+  const middle = lerp(from.place.position, to.place.position, 0.5);
+  const vias: Found[] = [];
+  for (const via of values.via ?? []) vias.push(await findPlace(via, fetchJson, middle));
+  const { routes, notes } = await findRoutes([from, ...vias, to].map((f) => f.place.position), fetchJson);
 
+  const pick = Number(values.route) - 1;
+  if (!Number.isInteger(pick) || pick < 0 || pick >= routes.length) {
+    throw new Error(`--route must be a number from 1 to ${routes.length}.`);
+  }
   const departure = parseTime(values.depart, offset);
-  const carSeconds = route.segmentDurations.reduce((a, b) => a + b, 0);
-  let timeScale = values.scale ? Number(values.scale) : 1;
-  if (values.arrive) timeScale = (parseTime(values.arrive, offset, departure) - departure) / 1000 / carSeconds;
-  if (!(timeScale > 0)) throw new Error('The time scale must be a positive number.');
-
-  const { passes, bins } = simulate(route, { departure, timeScale });
-  const stats = summarise(bins);
-  const decision = decide(bins, readScoring(values.continuity, values['cool-down']));
+  const timing = {
+    departure,
+    vehicle: parseVehicle(values.vehicle),
+    arrival: values.arrive ? parseTime(values.arrive, offset, departure) : undefined,
+    scale: values.scale ? Number(values.scale) : undefined,
+  };
+  if (timing.scale !== undefined && !(timing.scale > 0)) throw new Error('--scale must be a positive number.');
+  const scoring = readScoring(values.continuity, values['cool-down']);
+  const results: Result[] = routes.map((route) => {
+    const stretch = timeScale(total(route.segmentDurations), timing);
+    return { route, stretch, ...evaluate(route, departure, stretch.scale, scoring) };
+  });
+  const chosen = results[pick];
   const clock: Clock = { offset, departure };
 
-  printHeader(from, to, route, carSeconds, timeScale, Boolean(values.arrive), stats, clock);
-  printVerdict(decision, stats, clock);
-  printSides(stats, decision, clock);
-  printTimeline(bins, Math.max(1, Number(values.every) || 10), clock);
-  const files = await writeOutputs(from, to, route, passes, bins, clock);
+  printPlaces(from, vias, to);
+  printTrip(chosen, pick, results.length, timing.vehicle, clock);
+  printVerdict(chosen.decision, chosen.stats, clock);
+  printChecks(results, pick, shiftedVerdicts(chosen.route, departure, chosen.stretch.scale, scoring), notes, vias.length > 0);
+  printSides(chosen.stats, chosen.decision, clock);
+  printTimeline(chosen.bins, Math.max(1, Number(values.every) || 10), clock);
+  const files = await writeOutputs(from.place, to.place, results, pick, clock);
   console.log(`\nFull 1-minute data: ${files[0]}`);
   console.log(`Map: ${files[1]}  (drop it on https://geojson.io to see the route coloured by sunny side)`);
-  console.log('Map data © OpenStreetMap contributors (ODbL) · routing: OSRM · place search: Photon');
+  console.log('Map data © OpenStreetMap contributors (ODbL) · routing: OSRM, Valhalla · places: Photon, Open-Meteo');
 }
+
+const total = (values: number[]) => values.reduce((a, b) => a + b, 0);
 
 // ---------- input ----------
 
@@ -98,7 +133,7 @@ function cachedFetch(refresh: boolean): FetchJson {
     const wait = lastRequest + 1100 - Date.now(); // fair use: at most about one request a second
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     lastRequest = Date.now();
-    const get = () => fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+    const get = () => fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) });
     const res = await get().catch(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2000)); // one retry for a flaky connection
       return get();
@@ -113,10 +148,27 @@ function cachedFetch(refresh: boolean): FetchJson {
 
 const LAT_LON = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 
-async function resolvePlace(input: string, fetchJson: FetchJson): Promise<Place> {
+async function findPlace(input: string, fetchJson: FetchJson, near?: LonLat): Promise<Found> {
   const match = LAT_LON.exec(input);
-  if (match) return { label: `${match[1]}, ${match[2]}`, position: [Number(match[2]), Number(match[1])] };
-  return geocode(input, fetchJson);
+  if (match) return { place: { label: `${match[1]}, ${match[2]}`, position: [Number(match[2]), Number(match[1])] }, others: [] };
+  const [place, ...rest] = await searchPlaces(input, { limit: 3, near, fetchJson });
+  if (!place) throw new Error(`No place found for "${input}".`);
+  // Another town of the same name elsewhere in the country is worth a mention; a road named after it isn't.
+  const others = rest.filter(
+    (p) =>
+      p.label !== place.label &&
+      p.country === place.country &&
+      (p.kind === undefined || SETTLEMENTS.has(p.kind)) &&
+      distance(p.position, place.position) > 20_000,
+  );
+  return { place, others };
+}
+
+const SETTLEMENTS = new Set(['city', 'town', 'village', 'hamlet', 'suburb', 'locality', 'neighbourhood']);
+
+function parseVehicle(input: string): Vehicle {
+  if (input === 'bus' || input === 'car') return input;
+  throw new Error(`--vehicle must be bus or car, not "${input}".`);
 }
 
 function readScoring(continuity: string, coolDown: string): ScoringOptions {
@@ -156,17 +208,68 @@ function parseTime(input: string, offset: number, after?: number): number {
 const SIDES: Side[] = ['left', 'right', 'front', 'rear'];
 const BAR_FULL = 700; // W/m² for a full bar; the clear-sky side-window peak is about 660
 
-function printHeader(from: Place, to: Place, route: RoutedTrip, carSeconds: number, timeScale: number,
-  fromArrival: boolean, stats: TripStats, clock: Clock) {
-  const end = clock.departure + stats.minutes * 60_000;
-  const timing =
-    timeScale === 1 ? 'car time' : `${timeScale.toFixed(2)}× car time${fromArrival ? ' (fitted to your arrival time)' : ''}`;
-  console.log(`From  ${from.label}`);
-  console.log(`To    ${to.label}`);
-  console.log(`Road  ${(route.distance / 1000).toFixed(0)} km, ${hm(carSeconds / 60)} by car; timeline uses ${timing}`);
-  console.log(`When  ${dayName(clock.departure, clock.offset)}, ${hhmm(clock.departure, clock)} → ${hhmm(end, clock)} ${zone(clock.offset)}` +
-    `: ${hm(stats.minutes)} on the road, ${hm(stats.daylightMinutes)} of it in daylight`);
+function printPlaces(from: Found, vias: Found[], to: Found) {
+  const show = (title: string, { place, others }: Found) => {
+    console.log(`${title.padEnd(6)}${place.label}${place.kind ? ` (${place.kind})` : ''}`);
+    if (others.length) console.log(`      also found: ${others.map((p) => p.label).join('; ')}. Add detail if the first isn't right.`);
+  };
+  show('From', from);
+  for (const via of vias) show('Via', via);
+  show('To', to);
 }
+
+function printTrip({ route, stretch, stats }: Result, pick: number, count: number, vehicle: Vehicle, clock: Clock) {
+  const which = count > 1 ? `, route ${pick + 1} of ${count}` : '';
+  console.log(`Road  ${(route.distance / 1000).toFixed(0)} km ${route.label}${which}; ${hm(total(route.segmentDurations) / 60)} in free-flowing traffic`);
+  const basis =
+    stretch.basis === 'ticket'
+      ? 'fitted to your arrival time'
+      : stretch.basis === 'given'
+        ? `${stretch.scale}× the free-flowing time`
+        : `a typical ${vehicle} trip, ${stretch.scale}× the free-flowing time; give --arrive from your ticket to be exact`;
+  const end = clock.departure + stats.minutes * 60_000;
+  console.log(`When  ${dayName(clock.departure, clock.offset)}, ${hhmm(clock.departure, clock)} → ${hhmm(end, clock)} ${zone(clock.offset)} (${basis})`);
+  console.log(`      ${hm(stats.minutes)} on the road, ${hm(stats.daylightMinutes)} of it in daylight`);
+}
+
+/** Does the answer hold on the other routes, and if the bus leaves a little early or late? */
+function printChecks(results: Result[], pick: number, shifts: Shifted[], notes: string[], pinned: boolean) {
+  console.log('');
+  if (results.length > 1) {
+    console.log('Routes found, with the verdict for each:');
+    results.forEach((r, i) => {
+      const name = `${(r.route.distance / 1000).toFixed(0)} km ${r.route.label}`;
+      const mark = i === pick ? '   ← shown here' : '';
+      console.log(`  ${i + 1}. ${name.padEnd(40)} ${hm(r.stats.minutes)}   ${verdictLabel(r.decision.sit, r.decision.confidence)}${mark}`);
+    });
+    const verdicts = agreement(results.map((r) => r.decision.sit));
+    console.log(
+      verdicts === 'agree'
+        ? '  All routes agree.'
+        : verdicts === 'mostly'
+          ? '  The routes broadly agree; on some it hardly matters.'
+          : '  The routes DISAGREE: show the one your bus takes with --route, or pin it with --via.',
+    );
+  } else {
+    console.log(pinned ? 'Route pinned through your via towns.' : 'Only one route found. If your bus goes another way, pin it with --via.');
+  }
+  const when = (shift: number) => `${Math.abs(shift) >= 60 ? `${Math.abs(shift) / 60} h` : `${Math.abs(shift)} min`} ${shift < 0 ? 'early' : 'late'}`;
+  const sit = results[pick].decision.sit;
+  const flips = shifts.filter((s) => s.sit !== sit);
+  if (!flips.length) {
+    console.log(`Leaving ${list(shifts.map((s) => when(s.shift)))} gives the same answer.`);
+  } else {
+    const lead = sit === 'either' ? 'This departure is near the changeover' : 'Careful';
+    console.log(`${lead}: ${flips.map((s) => `leaving ${when(s.shift)} means ${verdictLabel(s.sit)}`).join('; ')}.`);
+  }
+  for (const note of notes) console.log(`Note: ${note}`);
+}
+
+const verdictLabel = (sit: Decision['sit'], confidence?: Decision['confidence']) =>
+  sit === 'either' ? 'either side' : `sit ${sit.toUpperCase()}${confidence === 'slight' ? ' (slightly)' : ''}`;
+
+/** "a, b or c". */
+const list = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(''));
 
 function printVerdict(d: Decision, stats: TripStats, clock: Clock) {
   const lines: string[] = [];
@@ -323,16 +426,15 @@ function zone(offset: number): string {
 
 // ---------- files ----------
 
-async function writeOutputs(from: Place, to: Place, route: RoutedTrip, passes: SegmentPass[], bins: TimelineBin[],
-  clock: Clock): Promise<string[]> {
+async function writeOutputs(from: Place, to: Place, results: Result[], pick: number, clock: Clock): Promise<string[]> {
   const stamp = new Date(clock.departure + clock.offset * 60_000).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   const name = `${slug(from.label)}-to-${slug(to.label)}-${stamp}`;
   const dir = path.join(ROOT, 'out');
   await mkdir(dir, { recursive: true });
   const csvFile = path.join(dir, `${name}.csv`);
   const mapFile = path.join(dir, `${name}.geojson`);
-  await writeFile(csvFile, toCsv(bins, clock));
-  await writeFile(mapFile, JSON.stringify(toGeoJson(from, to, route, passes, clock)));
+  await writeFile(csvFile, toCsv(results[pick].bins, clock));
+  await writeFile(mapFile, JSON.stringify(toGeoJson(from, to, results, pick, clock)));
   return [csvFile, mapFile].map((file) => path.relative(ROOT, file).replaceAll('\\', '/'));
 }
 
@@ -374,8 +476,22 @@ function category({ sun, faces }: SegmentPass): Category {
   return 'weak sun';
 }
 
-/** The route as coloured stretches (one per change of sunny side) plus start and end markers. */
-function toGeoJson(from: Place, to: Place, route: RoutedTrip, passes: SegmentPass[], clock: Clock) {
+/** The chosen route as coloured stretches (one per change of sunny side), the other routes in grey, and markers. */
+function toGeoJson(from: Place, to: Place, results: Result[], pick: number, clock: Clock) {
+  const { route, passes } = results[pick];
+  const others = results
+    .filter((_, i) => i !== pick)
+    .map((r) => ({
+      type: 'Feature',
+      properties: {
+        route: r.route.label,
+        verdict: verdictLabel(r.decision.sit, r.decision.confidence),
+        stroke: '#868e96',
+        'stroke-width': 3,
+        'stroke-opacity': 0.6,
+      },
+      geometry: { type: 'LineString', coordinates: r.route.coords },
+    }));
   const stretches: { category: Category; coords: LonLat[]; from: number; to: number }[] = [];
   for (const pass of passes) {
     const cat = category(pass);
@@ -395,6 +511,7 @@ function toGeoJson(from: Place, to: Place, route: RoutedTrip, passes: SegmentPas
   return {
     type: 'FeatureCollection',
     features: [
+      ...others,
       ...stretches.map((s) => ({
         type: 'Feature',
         properties: { category: s.category, from: hhmm(s.from, clock), to: hhmm(s.to, clock), stroke: COLOURS[s.category], 'stroke-width': 5 },

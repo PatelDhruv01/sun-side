@@ -1,22 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { destination, distance } from '../src/engine/geo.ts';
 import { simulate } from '../src/engine/simulate.ts';
 import { summarise } from '../src/engine/summary.ts';
-import type { LonLat, Route } from '../src/engine/types.ts';
-
-const MUMBAI: LonLat = [72.88, 19.08];
-const ist = (local: string) => Date.parse(`${local}+05:30`);
-
-/** A road made of straight legs ([bearing, km] pairs) at a steady speed, with a vertex every 250 m. */
-function road(start: LonLat, legs: [bearing: number, km: number][], kmh = 60): Route {
-  const coords: LonLat[] = [start];
-  for (const [bearing, km] of legs) {
-    for (let i = 0; i < Math.round(km * 4); i++) coords.push(destination(coords[coords.length - 1], bearing, 250));
-  }
-  const segmentDistances = coords.slice(1).map((c, i) => distance(coords[i], c));
-  return { coords, segmentDistances, segmentDurations: segmentDistances.map((m) => m / (kmh / 3.6)) };
-}
+import type { Route } from '../src/engine/types.ts';
+import { ist, MUMBAI, road } from './fakes.ts';
 
 const trip = (route: Route, depart: string, timeScale?: number) => simulate(route, { departure: ist(depart), timeScale });
 

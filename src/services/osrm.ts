@@ -1,3 +1,4 @@
+import { roadName } from '../engine/alternatives.ts';
 import type { LonLat, Route } from '../engine/types.ts';
 import { fetchJson as plainFetch, type FetchJson } from './http.ts';
 
@@ -7,8 +8,11 @@ const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
 export interface RoutedTrip extends Route {
   /** Total length, metres. */
   distance: number;
-  /** OSRM's own total for a car, seconds. */
+  /** Total driving time, seconds: OSRM's free-flowing car time, or Valhalla's rescaled to match. */
   duration: number;
+  /** Kilometres on each named road, e.g. { NH48: 64 }, for telling routes apart. */
+  roads: Record<string, number>;
+  engine: 'osrm' | 'valhalla';
 }
 
 interface OsrmResponse {
@@ -18,7 +22,10 @@ interface OsrmResponse {
     distance: number;
     duration: number;
     geometry: { coordinates: LonLat[] };
-    legs: { annotation: { duration: number[]; distance: number[] } }[];
+    legs: {
+      annotation: { duration: number[]; distance: number[] };
+      steps: { name: string; ref?: string; distance: number }[];
+    }[];
   }[];
 }
 
@@ -33,7 +40,7 @@ export async function fetchRoutes(
     geometries: 'geojson',
     annotations: 'duration,distance',
     alternatives: String(options.alternatives ?? false),
-    steps: 'false',
+    steps: 'true', // only for the road names
   });
   const body = (await (options.fetchJson ?? plainFetch)(`${OSRM_URL}/${path}?${query}`)) as OsrmResponse;
   if (body.code !== 'Ok') throw new Error(`OSRM could not find a route: ${body.code} ${body.message ?? ''}`);
@@ -44,6 +51,12 @@ export async function fetchRoutes(
     if (segmentDurations.length !== coords.length - 1) {
       throw new Error(`OSRM gave ${segmentDurations.length} segment times for ${coords.length - 1} segments`);
     }
-    return { coords, segmentDurations, segmentDistances, distance: r.distance, duration: r.duration };
+    const roads: Record<string, number> = {};
+    for (const step of r.legs.flatMap((leg) => leg.steps)) {
+      const raw = step.ref?.split(';')[0] || step.name; // "NH48;AH47" → "NH48"
+      const name = raw && roadName(raw);
+      if (name) roads[name] = (roads[name] ?? 0) + step.distance / 1000;
+    }
+    return { coords, segmentDurations, segmentDistances, distance: r.distance, duration: r.duration, roads, engine: 'osrm' as const };
   });
 }
