@@ -1,12 +1,45 @@
+import type { ReactNode } from 'react';
 import { Logo } from './Logo.tsx';
 import { EYEBROW } from './ui.tsx';
 
-const SOURCES: [string, string][] = [
-  ['Routes', 'OSRM and Valhalla on FOSSGIS servers'],
-  ['Places', 'Photon and Open-Meteo'],
-  ['Weather', 'Open-Meteo'],
-  ['Map', '© OpenFreeMap, OpenMapTiles, OpenStreetMap contributors'],
-  ['Sun', 'NOAA solar equations'],
+/** A credit link, opening in a new tab. */
+function Credit({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="underline decoration-axis underline-offset-2 transition-colors hover:text-ink hover:decoration-ink-2">
+      {children}
+    </a>
+  );
+}
+
+/** Who each part of the answer comes from. The open-data licences ask for credit with a link. */
+const SOURCES: [string, ReactNode][] = [
+  [
+    'Routes',
+    <>
+      <Credit href="https://project-osrm.org/">OSRM</Credit> and <Credit href="https://valhalla.github.io/valhalla/">Valhalla</Credit> on{' '}
+      <Credit href="https://www.fossgis.de/">FOSSGIS</Credit> servers
+    </>,
+  ],
+  [
+    'Places',
+    <>
+      <Credit href="https://photon.komoot.io/">Photon</Credit> and <Credit href="https://open-meteo.com/">Open-Meteo</Credit>
+    </>,
+  ],
+  [
+    'Weather',
+    <>
+      <Credit href="https://open-meteo.com/">Open-Meteo</Credit>, under <Credit href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</Credit>
+    </>,
+  ],
+  [
+    'Map',
+    <>
+      © <Credit href="https://openfreemap.org/">OpenFreeMap</Credit>, <Credit href="https://openmaptiles.org/">OpenMapTiles</Credit>,{' '}
+      <Credit href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</Credit>
+    </>,
+  ],
+  ['Sun', <Credit href="https://gml.noaa.gov/grad/solcalc/">NOAA solar equations</Credit>],
 ];
 
 export function Footer() {
