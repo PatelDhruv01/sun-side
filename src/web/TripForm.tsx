@@ -57,19 +57,33 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
         e.preventDefault();
         if (ready && !busy) onSubmit();
       }}
-      className={`${CARD} p-4 sm:p-6`}
+      className={`${CARD} @container p-4 sm:p-6`}
     >
-      <Segmented
-        legend="When are you leaving?"
-        hideLegend
-        name="when"
-        options={[
-          { value: 'at', label: 'At a set time' },
-          { value: 'day', label: 'Not sure yet' },
-        ]}
-        value={value.when}
-        onChange={(when) => set({ when })}
-      />
+      {/* when and how, side by side once the form is wide enough */}
+      <div className="grid gap-2 @md:grid-cols-[minmax(0,1fr)_minmax(0,11rem)]">
+        <Segmented
+          legend="When are you leaving?"
+          hideLegend
+          name="when"
+          options={[
+            { value: 'at', label: 'At a set time' },
+            { value: 'day', label: 'Not sure yet' },
+          ]}
+          value={value.when}
+          onChange={(when) => set({ when })}
+        />
+        <Segmented
+          legend="Going by"
+          hideLegend
+          name="vehicle"
+          options={[
+            { value: 'bus', label: 'Bus', icon: Bus },
+            { value: 'car', label: 'Car', icon: Car },
+          ]}
+          value={value.vehicle}
+          onChange={(vehicle) => set({ vehicle })}
+        />
+      </div>
 
       <div className="mt-5 space-y-3">
         <PlaceInput label="From" icon={<CircleDot className="size-4" />} field={value.from} onChange={(from) => set({ from })} placeholder="e.g. Ahmedabad" />
@@ -107,7 +121,7 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
         </button>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-3 @md:grid-cols-3">
         <Field
           id="trip-date"
           label="Date"
@@ -129,12 +143,22 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
             <Field id="trip-time" label="Leaves at" action={<LabelButton onClick={now}>Now</LabelButton>}>
               <input id="trip-time" type="time" required value={value.time} onChange={(e) => set({ time: e.target.value })} className={FIELD_INPUT} />
             </Field>
-            <Field id="trip-arrive" label="Arrives at" hint="optional, from your ticket" className="col-span-2">
+            <Field
+              id="trip-arrive"
+              label="Arrives at"
+              hint={
+                <>
+                  <span className="@md:hidden">optional, from your ticket</span>
+                  <span className="hidden @md:inline">optional</span>
+                </>
+              }
+              className="col-span-2 @md:col-span-1"
+            >
               <input id="trip-arrive" type="time" value={value.arrive} onChange={(e) => set({ arrive: e.target.value })} className={FIELD_INPUT} />
             </Field>
           </>
         ) : (
-          <Field id="trip-hours" label="Takes" hint="hours, optional">
+          <Field id="trip-hours" label="Takes" hint="hours, optional" className="@md:col-span-2">
             <input
               id="trip-hours"
               type="number"
@@ -150,23 +174,10 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
         )}
       </div>
 
-      <div className="mt-4">
-        <Segmented
-          legend="Going by"
-          name="vehicle"
-          options={[
-            { value: 'bus', label: 'Bus', icon: Bus },
-            { value: 'car', label: 'Car', icon: Car },
-          ]}
-          value={value.vehicle}
-          onChange={(vehicle) => set({ vehicle })}
-        />
-      </div>
-
       <button
         type="submit"
         disabled={!ready || busy}
-        className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink text-base font-semibold text-surface shadow-sm transition-colors hover:bg-ink/85 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:opacity-50"
+        className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink text-base font-semibold text-surface shadow-sm transition-colors hover:bg-ink/85 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:opacity-50"
       >
         {busy ? (
           <>
@@ -204,7 +215,7 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
 function Field({ id, label, hint, action, className = '', children }: {
   id: string;
   label: string;
-  hint?: string;
+  hint?: ReactNode;
   action?: ReactNode;
   className?: string;
   children: ReactNode;

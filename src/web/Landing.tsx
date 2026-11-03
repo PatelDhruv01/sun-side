@@ -128,7 +128,7 @@ function startPlanning() {
 export function Landing({ search }: { search: ReactNode }) {
   return (
     <>
-      <section className="mx-auto max-w-6xl px-4 pt-10 pb-12 sm:pt-16 lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start lg:gap-14 lg:pt-20">
+      <section className="mx-auto max-w-6xl px-4 pt-10 pb-12 sm:pt-16 lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start lg:gap-14 lg:pt-14">
         <div>
           <p className="inline-flex animate-rise items-center gap-2 rounded-full bg-surface px-3 py-1 text-xs font-medium text-ink-2 shadow-sm ring-1 ring-hairline">
             <SunMedium aria-hidden className="size-3.5 text-brand motion-safe:animate-spin-slow" />
@@ -139,25 +139,26 @@ export function Landing({ search }: { search: ReactNode }) {
             <span className="animate-highlight bg-[linear-gradient(transparent_60%,var(--color-brand-soft)_60%)] bg-no-repeat">shady side.</span>
           </h1>
           <p className="mt-5 max-w-xl animate-rise text-lg leading-relaxed text-ink-2" style={stagger(2)}>
-            Sun Side drives your real route minute by minute, with every bend in the road, the sun's direction and height, and the weather forecast,
-            then tells you which side of the bus or car stays out of the sun.
+            Sun Side follows your real route minute by minute, bend by bend, with the sun's path and the weather forecast, then tells you which side
+            of the bus or car stays out of the sun.
           </p>
           <div id="plan" className="mt-8 animate-rise scroll-mt-24" style={stagger(3)}>
             {search}
           </div>
         </div>
-        <HeroArt className="mt-12 animate-rise lg:sticky lg:top-24 lg:mt-4" />
-      </section>
-
-      <section aria-label="In numbers" className="mx-auto max-w-6xl px-4 pb-6">
-        <ul className="reveal grid grid-cols-2 gap-px overflow-hidden rounded-3xl bg-hairline ring-1 ring-hairline md:grid-cols-4">
-          {FIGURES.map(({ figure, text }) => (
-            <li key={figure} className="bg-surface px-5 py-5 sm:px-6">
-              <span className="block text-2xl font-semibold tracking-tight sm:text-[1.7rem]">{figure}</span>
-              <span className="mt-1 block text-sm text-ink-2">{text}</span>
-            </li>
-          ))}
-        </ul>
+        {/* The demo and the figures behind it, together about as tall as the search beside them.
+            On tall screens they stay in view while you fill in the form. */}
+        <div className="mx-auto mt-12 w-full max-w-[34rem] space-y-4 lg:mt-4 lg:tall:sticky lg:tall:top-20">
+          <HeroArt className="animate-rise" />
+          <ul aria-label="In numbers" className="grid animate-rise grid-cols-2 gap-px overflow-hidden rounded-[1.75rem] bg-hairline shadow-sm ring-1 ring-hairline" style={stagger(2)}>
+            {FIGURES.map(({ figure, text }) => (
+              <li key={figure} className="bg-surface px-5 py-4">
+                <span className="block text-2xl font-semibold tracking-tight">{figure}</span>
+                <span className="mt-0.5 block text-sm text-ink-2">{text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
 
       <section id="how" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-14">
