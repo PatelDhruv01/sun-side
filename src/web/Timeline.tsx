@@ -1,4 +1,4 @@
-import { SunMedium } from 'lucide-react';
+import { Pause, Play, RotateCcw, SunMedium } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { ClockFormat } from '../app/explain.ts';
 import type { RouteResult } from '../app/plan.ts';
@@ -25,16 +25,29 @@ const LANES = [
   { side: 'right', name: 'Right window', line: 'stroke-sun-right', area: 'fill-sun-right/10', dot: 'fill-sun-right', key: 'bg-sun-right' },
 ] as const;
 
-/** Direct sun on each side window over the trip, with a crosshair and a table view. */
-export function Timeline({ result, clock, weather }: { result: RouteResult; clock: ClockFormat; weather: Weather | null }) {
+interface Props {
+  result: RouteResult;
+  clock: ClockFormat;
+  weather: Weather | null;
+  /** The minute pointed at (an index into the chart's bins), shared with the map. */
+  cursor: number | null;
+  /** Pointing or arrowing at a minute, or away (null). */
+  onCursor: (index: number | null) => void;
+  playing: boolean;
+  onPlay: () => void;
+}
+
+/** The bins the chart draws: a last fragment of a few seconds would draw as a full-height spike (the table still has it). */
+export const chartBins = (bins: TimelineBin[]) => (bins.length > 1 && bins[bins.length - 1].seconds < 20 ? bins.slice(0, -1) : bins);
+
+/** Direct sun on each side window over the trip, with a crosshair, playback and a table view. */
+export function Timeline({ result, clock, weather, cursor, onCursor, playing, onPlay }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
-  const [hover, setHover] = useState<number | null>(null);
   const [asTable, setAsTable] = useState(false);
   const { decision } = result;
-  // A last fragment of a few seconds would draw as a full-height spike; the table still has it.
-  const tail = result.bins[result.bins.length - 1];
-  const bins = result.bins.length > 1 && tail.seconds < 20 ? result.bins.slice(0, -1) : result.bins;
+  const bins = chartBins(result.bins);
+  const hover = cursor !== null && cursor < bins.length ? cursor : null;
   const start = bins[0].start;
   const last = bins[bins.length - 1];
   const end = last.start + last.seconds * 1000;
@@ -51,7 +64,7 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
     const time = start + ((clientX - element.getBoundingClientRect().left - PAD_LEFT) / plotWidth) * (end - start);
     return Math.max(0, Math.min(bins.length - 1, Math.floor((time - start) / 60_000))); // one-minute bins
   };
-  const onPointer = (e: PointerEvent<SVGSVGElement>) => setHover(binAt(e.clientX, e.currentTarget));
+  const onPointer = (e: PointerEvent<SVGSVGElement>) => onCursor(binAt(e.clientX, e.currentTarget));
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.shiftKey ? 10 : 1;
     const moves: Record<string, (h: number) => number> = {
@@ -60,11 +73,13 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
       Home: () => 0,
       End: () => bins.length - 1,
     };
-    if (e.key === 'Escape') setHover(null);
+    if (e.key === 'Escape') onCursor(null);
     if (!moves[e.key]) return;
     e.preventDefault();
-    setHover((h) => Math.max(0, Math.min(bins.length - 1, moves[e.key](h ?? -1))));
+    onCursor(Math.max(0, Math.min(bins.length - 1, moves[e.key](hover ?? -1))));
   };
+  const atEnd = hover === bins.length - 1;
+  const PlayIcon = playing ? Pause : atEnd ? RotateCcw : Play;
 
   const shown = hover === null ? null : bins[hover];
   const sky = shown && weather ? weatherAt(weather, shown.position, middle(shown)) : undefined;
@@ -72,20 +87,35 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
   const tipLeft = crossX + 12 + TIP_WIDTH <= width ? crossX + 12 : Math.max(0, crossX - 12 - TIP_WIDTH);
 
   return (
-    <section aria-labelledby="timeline" className={`${CARD} p-5 sm:p-6`}>
-      <div className="flex items-baseline justify-between gap-3">
+    <section aria-labelledby="timeline" className={`${CARD} animate-rise p-5 sm:p-6`} style={{ animationDelay: '120ms' }}>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <h3 id="timeline" className="flex items-center gap-2 text-sm font-semibold">
-          <SunMedium aria-hidden className="size-4 text-muted" />
-          Sun on each side, minute by minute <span className="font-normal text-muted">W/m²</span>
+          <SunMedium aria-hidden className="size-4 shrink-0 text-muted" />
+          <span>
+            Sun on each side, minute by minute <span className="font-normal text-muted">W/m²</span>
+          </span>
         </h3>
-        <button
-          type="button"
-          onClick={() => setAsTable((t) => !t)}
-          className="shrink-0 text-xs text-ink-2 underline decoration-axis underline-offset-4 hover:text-ink"
-        >
-          {asTable ? 'Show the chart' : 'Show as a table'}
-        </button>
+        <div className="flex items-center gap-3">
+          {!asTable && (
+            <button
+              type="button"
+              onClick={onPlay}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-surface shadow-sm transition-[background-color,scale] hover:bg-ink/85 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none active:scale-[0.96]"
+            >
+              <PlayIcon aria-hidden className="size-3.5" />
+              {playing ? 'Pause' : atEnd ? 'Play again' : 'Play the trip'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setAsTable((t) => !t)}
+            className="shrink-0 text-xs text-ink-2 underline decoration-axis underline-offset-4 hover:text-ink"
+          >
+            {asTable ? 'Show the chart' : 'Show as a table'}
+          </button>
+        </div>
       </div>
+      {!asTable && <p className="mt-1 text-xs text-muted">Point at the chart, or play the trip, to follow it on the map.</p>}
 
       {asTable && <TimelineTable result={result} clock={clock} />}
 
@@ -93,7 +123,7 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
         ref={box}
         tabIndex={0}
         onKeyDown={onKey}
-        onBlur={() => setHover(null)}
+        onBlur={() => onCursor(null)}
         aria-label="Sun timeline. Use the left and right arrow keys to read each minute."
         className={`relative mt-3 rounded outline-none focus-visible:ring-2 focus-visible:ring-ink-2 ${asTable ? 'hidden' : ''}`}
         style={{ height: HEIGHT }}
@@ -106,7 +136,7 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
             className="absolute inset-0 touch-pan-y select-none"
             onPointerMove={onPointer}
             onPointerDown={onPointer}
-            onPointerLeave={() => setHover(null)}
+            onPointerLeave={() => onCursor(null)}
             aria-hidden
           >
             {nightRanges(bins).map(([from, to]) => (
@@ -162,6 +192,10 @@ export function Timeline({ result, clock, weather }: { result: RouteResult; cloc
               );
             })}
 
+            {/* while playing, the rest of the trip waits under a veil */}
+            {playing && shown && (
+              <rect x={crossX} y={plotTop - 2} width={Math.max(0, PAD_LEFT + plotWidth - crossX)} height={plotBottom - plotTop + 2} className="fill-surface" opacity="0.6" />
+            )}
             {shown && (
               <g>
                 <line x1={crossX} x2={crossX} y1={plotTop} y2={plotBottom} className="stroke-ink-2" />

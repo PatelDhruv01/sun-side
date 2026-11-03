@@ -1,10 +1,12 @@
 import type { FeatureCollection } from 'geojson';
-import { LngLatBounds, MapLibreMap, NavigationControl, Popup, setWorkerUrl, type GeoJSONSource, type MapLayerMouseEvent } from 'maplibre-gl';
+import { FullscreenControl, LngLatBounds, MapLibreMap, Marker, NavigationControl, Popup, setWorkerUrl, type GeoJSONSource, type MapLayerMouseEvent } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { useEffect, useRef, useState } from 'react';
 import type { ClockFormat } from '../app/explain.ts';
 import { stretches, type SunCategory } from '../app/stretches.ts';
-import type { LonLat, SegmentPass } from '../engine/types.ts';
+import { compass } from '../engine/geo.ts';
+import { SUN_THRESHOLD } from '../engine/summary.ts';
+import type { LonLat, SegmentPass, TimelineBin } from '../engine/types.ts';
 import type { Place } from '../services/geocode.ts';
 import type { CandidateRoute } from '../services/routing.ts';
 import { themeColour } from './hooks.ts';
@@ -37,7 +39,22 @@ interface Props {
   places: Place[];
   clock: ClockFormat | null;
   onSelect: (index: number) => void;
+  /** A moment of the trip to show the vehicle at, with the sun's direction: from the timeline or playback. */
+  cursor?: TimelineBin | null;
 }
+
+/** The vehicle on the map, nose up, its sunny side's windows lit; and a dot towards the sun. */
+const VEHICLE = `
+  <div data-sun class="absolute inset-0 transition-opacity duration-200">
+    <span class="absolute top-0 left-1/2 size-3 -translate-x-1/2 rounded-full bg-brand shadow-[0_0_12px_3px_var(--color-brand)]"></span>
+    <span class="absolute top-3.5 left-1/2 h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-brand/60"></span>
+  </div>
+  <svg data-vehicle viewBox="0 0 24 32" class="absolute top-1/2 left-1/2 h-8 w-6 -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_2px_4px_rgb(0_0_0/0.35)]">
+    <rect x="4.5" y="2.5" width="15" height="27" rx="5" class="fill-surface stroke-ink" stroke-width="2" />
+    <path d="M7.5 7.5 Q12 5 16.5 7.5 L16.5 10 Q12 8 7.5 10 Z" class="fill-ink" opacity="0.5" />
+    <rect data-left x="2.5" y="11" width="2.5" height="15" rx="1.2" class="fill-axis" />
+    <rect data-right x="19" y="11" width="2.5" height="15" rx="1.2" class="fill-axis" />
+  </svg>`;
 
 const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
   type: 'Feature' as const,
@@ -45,9 +62,10 @@ const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
   geometry: { type: 'LineString' as const, coordinates },
 });
 
-export function RouteMap({ routes, selected, passes, places, clock, onSelect }: Props) {
+export function RouteMap({ routes, selected, passes, places, clock, onSelect, cursor = null }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
+  const marker = useRef<Marker | null>(null);
   const { dark } = useTheme();
 
   // A fresh map whenever the colour scheme changes: the dark base map is a different style.
@@ -59,8 +77,13 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect }: 
       zoom: 3.3,
       attributionControl: { compact: true },
       cooperativeGestures: true, // the page scrolls past the map; Ctrl+scroll or two fingers move it
+      dragRotate: false, // north stays up, so the sun's direction reads true
+      pitchWithRotate: false,
     });
+    m.touchZoomRotate.disableRotation();
+    m.keyboard.disableRotation();
     m.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+    m.addControl(new FullscreenControl(), 'top-right');
     m.on('load', () => {
       const round = { 'line-join': 'round', 'line-cap': 'round' } as const;
       for (const id of ['alternatives', 'route', 'places']) m.addSource(id, { type: 'geojson', data: NOTHING });
@@ -86,11 +109,38 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect }: 
       });
       setMap(m);
     });
+    const element = document.createElement('div');
+    element.className = 'pointer-events-none size-16'; // MapLibre places it absolutely
+    element.innerHTML = VEHICLE;
+    marker.current = new Marker({ element });
     return () => {
       setMap(null);
+      marker.current?.remove();
+      marker.current = null;
       m.remove();
     };
   }, [dark]);
+
+  // The vehicle at the moment the timeline points to, turned to the road, its sunny side lit.
+  useEffect(() => {
+    const pin = marker.current;
+    if (!map || !pin) return;
+    if (!cursor) {
+      pin.remove();
+      return;
+    }
+    const element = pin.getElement();
+    const vehicle = element.querySelector<SVGElement>('[data-vehicle]')!;
+    const sun = element.querySelector<HTMLElement>('[data-sun]')!;
+    vehicle.style.rotate = `${cursor.heading}deg`;
+    sun.style.rotate = `${cursor.sun.azimuth}deg`;
+    sun.style.opacity = cursor.sun.elevation > 0 ? '1' : '0';
+    for (const side of ['left', 'right'] as const) {
+      element.querySelector(`[data-${side}]`)!.setAttribute('class', cursor.faces[side] >= SUN_THRESHOLD ? 'fill-brand' : 'fill-axis');
+    }
+    pin.setLngLat(cursor.position);
+    if (!pin.getElement().isConnected) pin.addTo(map);
+  }, [map, cursor]);
 
   // The chosen route coloured by sunny side (or plain, with no time picked), the others in grey, and the places as dots.
   useEffect(() => {
@@ -168,9 +218,23 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect }: 
     };
   }, [map, clock, onSelect]);
 
+  const sunny = cursor ? (['left', 'right'] as const).find((side) => cursor.faces[side] >= SUN_THRESHOLD && cursor.faces[side] >= cursor.faces[side === 'left' ? 'right' : 'left']) : undefined;
   return (
-    <section aria-label="Route map" className={`${CARD} overflow-hidden`}>
-      <div ref={box} className="h-72 w-full lg:h-[30rem]" />
+    <section aria-label="Route map" className={`${CARD} animate-rise overflow-hidden`}>
+      <div className="relative">
+        <div ref={box} className="h-72 w-full lg:h-[30rem]" />
+        {cursor && clock && (
+          <p aria-hidden className="pointer-events-none absolute top-3 left-3 flex items-center gap-2 rounded-xl bg-surface/90 px-3 py-2 text-xs shadow-lg ring-1 ring-ink/5 backdrop-blur">
+            <span className="font-semibold tabular-nums">{clock(cursor.start)}</span>
+            <span className="text-muted tabular-nums">km {Math.round(cursor.distance / 1000)}</span>
+            <span className="h-3.5 w-px bg-hairline" />
+            <span className={`size-2 rounded-full ${sunny === 'left' ? 'bg-sun-left' : sunny === 'right' ? 'bg-sun-right' : cursor.sun.elevation > 0 ? 'bg-weak' : 'bg-night'}`} />
+            <span className="text-ink-2">
+              {cursor.sun.elevation <= 0 ? 'Sun down' : sunny ? `Sun on the ${sunny}, ${compass(cursor.sun.azimuth)}` : `Sun ${compass(cursor.sun.azimuth)}, not on a side`}
+            </span>
+          </p>
+        )}
+      </div>
       {routes && !passes && <p className="px-5 py-3.5 text-xs text-ink-2">Pick a departure time to see the route coloured by sunny side.</p>}
       {routes && passes && (
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 px-5 py-3.5 text-xs text-ink-2">

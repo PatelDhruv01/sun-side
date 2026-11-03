@@ -26,7 +26,7 @@ export function DayPlanView({ plan, start, vehicle, hours, clock, notes, onPick 
   const basis = hours ? `${shortDuration(hours * 60)} trip` : `typical ${vehicle} trip`;
 
   return (
-    <section aria-labelledby="day-plan" className={`${CARD} p-5 sm:p-6`}>
+    <section aria-labelledby="day-plan" className={`${CARD} animate-rise p-5 sm:p-6`}>
       <Pill icon={CalendarDays}>
         {dayLabel(start)} · {basis}
       </Pill>
@@ -74,15 +74,17 @@ function DayStrip({ verdicts, clock, onPick }: { verdicts: DepartureVerdict[]; c
     // The list below says the same in words and is what keyboards and screen readers use.
     <div className="mt-6" aria-hidden>
       <div className="flex h-12 gap-[2px]">
-        {verdicts.map((v) => (
-          <button
-            key={v.departure}
-            type="button"
-            tabIndex={-1}
-            onClick={() => onPick(v.departure)}
-            title={`${clock(v.departure)}: ${describe(v)}`}
-            className={`flex-1 transition-opacity first:rounded-l-xl last:rounded-r-xl hover:opacity-70 ${fill(v)} ${v.confidence === 'slight' ? 'opacity-55' : ''}`}
-          />
+        {verdicts.map((v, i) => (
+          // the cells fill in from midnight onwards; the wrapper keeps the faded ones faded
+          <span key={v.departure} className="flex flex-1 animate-fade first:*:rounded-l-xl last:*:rounded-r-xl" style={{ animationDelay: `${150 + i * 14}ms` }}>
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => onPick(v.departure)}
+              title={`${clock(v.departure)}: ${describe(v)}`}
+              className={`flex-1 transition-[opacity,scale] duration-200 hover:scale-y-110 hover:opacity-70 ${fill(v)} ${v.confidence === 'slight' ? 'opacity-55' : ''}`}
+            />
+          </span>
         ))}
       </div>
       <div className="mt-1.5 flex justify-between text-[11px] text-muted tabular-nums">

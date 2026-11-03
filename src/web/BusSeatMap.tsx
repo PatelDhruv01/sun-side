@@ -37,8 +37,8 @@ export function BusSeatMap({ sit, sunny, avoidRows, className = '' }: Props) {
 
       {sunny && (
         <g>
-          <polygon points={right ? '131,80 131,244 178,226 178,98' : '49,80 49,244 2,226 2,98'} fill="url(#seat-beam)" />
-          <g className="stroke-brand" strokeWidth="2.5" strokeLinecap="round">
+          <polygon points={right ? '131,80 131,244 178,226 178,98' : '49,80 49,244 2,226 2,98'} fill="url(#seat-beam)" className="motion-safe:animate-glow" />
+          <g className="origin-center stroke-brand [transform-box:fill-box] motion-safe:animate-spin-slow" strokeWidth="2.5" strokeLinecap="round">
             {Array.from({ length: 8 }, (_, i) => {
               const a = (i * Math.PI) / 4;
               const cx = right ? 160 : 20;
@@ -84,8 +84,11 @@ export function BusSeatMap({ sit, sunny, avoidRows, className = '' }: Props) {
 
       {sit !== 'either' && (
         <g transform={`translate(${sit === 'left' ? 28 : 152} 165)`}>
-          <circle r="11" className="fill-good" />
-          <path d="M-5 0.5 l3.5 3.5 l6.5 -7" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          {/* the pop scales this inner group, leaving the placement above alone */}
+          <g className="origin-center animate-pop [transform-box:fill-box]" style={{ animationDelay: '450ms' }}>
+            <circle r="11" className="fill-good" />
+            <path d="M-5 0.5 l3.5 3.5 l6.5 -7" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </g>
         </g>
       )}
 

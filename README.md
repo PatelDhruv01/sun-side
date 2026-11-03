@@ -22,13 +22,19 @@ coloured by sunny side, and the sun on each side window over the trip. Choose **
 instead of a time and it works out every departure that day ("leave 06:00–12:00: sit LEFT…");
 pick one for the full answer. `npm run build` makes the static site in `dist/`.
 
-The page opens on a short explainer (how it works, why a compass isn't enough, FAQ) with
-the search up top and one-click example trips. An answer shows a seat map of the bus, the
-sun time on each side, any seat change worth making, and how sure it is. Every trip lives in
-the address bar, so **Share** (or copying the link) opens the same answer elsewhere, and the
-back button steps through your searches. **Return trip** flips the places and shows the whole
-day for the way back. It has light and dark themes (following the system until you pick one),
-works on phones, and can be added to a home screen.
+The page opens with the search, one-click example trips, your recent trips (kept in your
+browser only) and a live demo: a bus drives a winding road while the sun swings from side to
+side at every bend and the minutes add up to an answer. Below that: how it works, the
+features, why a compass isn't enough, and an FAQ. An answer leads with the trip's figures
+(share of the trip in shade, distance, time, forecast), then a seat map of the bus, the sun
+time on each side, any seat change worth making, and how sure it is. **Play the trip** runs
+the timeline and moves the vehicle along the map, with the sun's direction and the lit side;
+pointing at the chart does the same for any minute. Every trip lives in the address bar, so
+**Share** (or copying the link) opens the same answer elsewhere, and the back button steps
+through your searches. **Return trip** flips the places and shows the whole day for the way
+back. It has light and dark themes (following the system until you pick one, switched with
+a spreading circle where the browser can), works on phones, and can be added to a home
+screen. All the motion is decoration: with "reduce motion" set, everything is still.
 
 The same engine runs from the command line, with more detail and knobs:
 
@@ -136,7 +142,7 @@ for a pause in typing before searching. A failed request is retried once.
 - No shade from hills, buildings or trees.
 - The scoring thresholds are first guesses, to be tuned on real trips.
 - The page reads and shows times in the reader's own time zone.
-- The page's script is about 100 KB compressed; the map (about 290 KB, mostly MapLibre) loads
+- The page's script is about 110 KB compressed; the map (about 300 KB, mostly MapLibre) loads
   only once there's an answer to show.
 
 ## Roadmap

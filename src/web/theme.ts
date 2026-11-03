@@ -1,6 +1,7 @@
 // Light, dark, or whatever the system says. The pick is kept in localStorage; index.html
 // applies it before the first paint so a dark page never flashes light.
 import { useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
@@ -30,6 +31,22 @@ export function setTheme(next: ThemeChoice) {
   if (next === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = next;
   for (const listener of listeners) listener();
+}
+
+/** Switch themes with the new one spreading out in a circle from `origin`, where the browser can. */
+export function switchTheme(next: ThemeChoice, origin: { x: number; y: number }) {
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return setTheme(next);
+  const { x, y } = origin;
+  const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+  const transition = document.startViewTransition(() => flushSync(() => setTheme(next)));
+  transition.ready
+    .then(() =>
+      document.documentElement.animate(
+        { clipPath: [`circle(0 at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 650, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', pseudoElement: '::view-transition-new(root)' },
+      ),
+    )
+    .catch(() => {}); // skipped transitions still switch the theme
 }
 
 function subscribe(listener: () => void) {

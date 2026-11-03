@@ -1,12 +1,21 @@
 // Small shared building blocks, so every card and button looks the same.
 import type { LucideIcon } from 'lucide-react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { useCountUp } from './hooks.ts';
+
+/** A number that counts up when it first shows, written by `format`. */
+export function CountUp({ to, format }: { to: number; format: (n: number) => string }) {
+  return <>{format(useCountUp(to))}</>;
+}
 
 /** The look of every card on the page. */
 export const CARD = 'rounded-3xl bg-surface ring-1 ring-ink/[0.06] shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-16px_rgb(0_0_0/0.18)]';
 
 /** A small label above a heading. */
 export const EYEBROW = 'text-xs font-semibold tracking-[0.08em] text-muted uppercase';
+
+/** For the `i`th of a run of things rising in one after another (with `animate-rise`). */
+export const stagger = (i: number, step = 70) => ({ animationDelay: `${i * step}ms` });
 
 type Variant = 'primary' | 'secondary' | 'ghost';
 
@@ -27,7 +36,7 @@ export function Button({ variant = 'secondary', icon: Icon, iconOnly, children, 
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-50 ${
+      className={`inline-flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-[color,background-color,box-shadow,transform] duration-150 select-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none active:scale-[0.97] disabled:opacity-50 ${
         iconOnly ? 'size-9' : 'px-3.5 py-2'
       } ${VARIANTS[variant]} ${className}`}
       {...rest}

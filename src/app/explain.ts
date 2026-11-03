@@ -93,21 +93,26 @@ export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weath
   return { headline, reasons, tips, heat: `Heat score (lower is better): left ${Math.round(d.heat.left)}, right ${Math.round(d.heat.right)}.` };
 }
 
+/** The sky over the trip in a word or two: "mostly cloudy", "some cloud", "hazy" or "clear". */
+export function sky(weather: TripWeather): 'mostly cloudy' | 'some cloud' | 'hazy' | 'clear' {
+  const cloud = Math.round(weather.cloud);
+  return cloud >= 60 ? 'mostly cloudy' : cloud >= 20 ? 'some cloud' : weather.clearness < 0.7 ? 'hazy' : 'clear';
+}
+
 /** The forecast along the trip in a sentence, e.g. "Forecast: clear skies, 24–31 °C." */
 export function weatherSentence(weather: TripWeather): string {
   const cloud = Math.round(weather.cloud);
-  const sky =
-    cloud >= 60
-      ? `mostly cloudy (${cloud}% cover), so there's less sun to dodge`
-      : cloud >= 20
-        ? `some cloud (${cloud}% cover on average)`
-        : weather.clearness < 0.7
-          ? 'clear but hazy, which takes the edge off the sun'
-          : 'clear skies';
-  return `Forecast: ${sky}, ${temperatures(weather)}.`;
+  const words = {
+    'mostly cloudy': `mostly cloudy (${cloud}% cover), so there's less sun to dodge`,
+    'some cloud': `some cloud (${cloud}% cover on average)`,
+    hazy: 'clear but hazy, which takes the edge off the sun',
+    clear: 'clear skies',
+  };
+  return `Forecast: ${words[sky(weather)]}, ${temperatures(weather)}.`;
 }
 
-const temperatures = ({ minTemperature, maxTemperature }: TripWeather) => {
+/** "24–31 °C", or "about 28 °C" when it hardly changes. */
+export const temperatures = ({ minTemperature, maxTemperature }: TripWeather) => {
   const [low, high] = [Math.round(minTemperature), Math.round(maxTemperature)];
   return low === high ? `about ${low} °C` : `${low}–${high} °C`;
 };

@@ -8,7 +8,7 @@ import type { Timing } from '../engine/timing.ts';
 import { tripWeather } from '../engine/weather.ts';
 import { BusSeatMap } from './BusSeatMap.tsx';
 import { dayLabel, shortDuration } from './time.ts';
-import { CARD, Pill } from './ui.tsx';
+import { CARD, CountUp, Pill, stagger } from './ui.tsx';
 
 /** How the page tells you to pin or pick a route. */
 const HINTS = { pin: 'add a town it goes through', pick: 'pick the one your bus takes below' };
@@ -41,7 +41,7 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
       : `Times assume a typical ${timing.vehicle} trip, ${stretch.scale}× free-flowing traffic; add your arrival time for a closer answer.`;
 
   return (
-    <section aria-labelledby="verdict" className={`${CARD} overflow-hidden`}>
+    <section aria-labelledby="verdict" className={`${CARD} animate-rise overflow-hidden`}>
       <div className="p-5 sm:p-6">
         {onBackToDay && (
           <button
@@ -54,17 +54,19 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
           </button>
         )}
 
-        <Pill tone={confidence.tone} icon={confidence.icon}>
-          {confidence.label}
-        </Pill>
-        <h2 id="verdict" className="mt-3 text-[2.25rem] leading-[1.05] font-semibold tracking-[-0.03em] sm:text-[2.75rem]">
+        <div className="animate-pop" style={stagger(1)}>
+          <Pill tone={confidence.tone} icon={confidence.icon}>
+            {confidence.label}
+          </Pill>
+        </div>
+        <h2 id="verdict" className="mt-3 animate-rise text-[2.25rem] leading-[1.05] font-semibold tracking-[-0.03em] sm:text-[2.75rem]" style={stagger(1)}>
           {either ? 'Either side' : `Sit on the ${decision.sit}`}
         </h2>
-        <p className="mt-2 text-sm text-ink-2">
+        <p className="mt-2 animate-rise text-sm text-ink-2" style={stagger(2)}>
           {dayLabel(timing.departure)} · {clock(timing.departure)} → {clock(end)} · {shortDuration(stats.minutes)}
         </p>
 
-        <div className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4">
+        <div className="mt-5 grid animate-rise grid-cols-[auto_minmax(0,1fr)] items-center gap-4" style={stagger(3)}>
           <BusSeatMap
             sit={decision.sit}
             sunny={either ? undefined : otherSide(decision.sit as SeatSide)}
@@ -77,7 +79,7 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
           </div>
         </div>
 
-        <div className="mt-5 space-y-2 leading-relaxed">
+        <div className="mt-5 animate-rise space-y-2 leading-relaxed" style={stagger(4)}>
           {/* For "either", the headline's second half says why; a side is already said above. */}
           {either && <p className="font-medium">{capitalise(headline.replace(/^Either side: /, ''))}</p>}
           {reasons.map((reason) => (
@@ -100,10 +102,10 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
         <ul className="space-y-2 px-5 pb-5 sm:px-6">
           {tips
             .filter((tip) => tip.kind !== 'switch') // drawn above instead
-            .map((tip) => {
+            .map((tip, i) => {
               const Icon = TIP_ICONS[tip.kind];
               return (
-                <li key={tip.text} className="flex gap-3 rounded-2xl bg-raised p-3.5 text-sm leading-relaxed ring-1 ring-hairline">
+                <li key={tip.text} className="flex animate-rise gap-3 rounded-2xl bg-raised p-3.5 text-sm leading-relaxed ring-1 ring-hairline" style={stagger(5 + i)}>
                   <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-brand" />
                   <span>{capitalise(tip.text.replace(/^Tip: /, ''))}</span>
                 </li>
@@ -147,11 +149,16 @@ function SideTile({ side, stats, best }: { side: SeatSide; stats: TripStats; bes
         {best && <Check aria-label="the side to sit on" className="size-3.5 text-good" strokeWidth={3} />}
       </p>
       <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5">
-        <span className="text-xl font-semibold tracking-tight whitespace-nowrap">{sunMinutes < 1 ? 'No sun' : shortDuration(sunMinutes)}</span>
+        <span className="text-xl font-semibold tracking-tight whitespace-nowrap tabular-nums">
+          {sunMinutes < 1 ? 'No sun' : <CountUp to={sunMinutes} format={(n) => shortDuration(Math.max(1, Math.round(n)))} />}
+        </span>
         {sunMinutes >= 1 && <span className="text-xs text-muted">of direct sun</span>}
       </p>
       <div className="mt-2 h-1.5 rounded-full bg-hairline">
-        <div className={`h-full rounded-full ${side === 'left' ? 'bg-sun-left' : 'bg-sun-right'}`} style={{ width: `${share * 100}%` }} />
+        <div
+          className={`h-full origin-left animate-grow rounded-full ${side === 'left' ? 'bg-sun-left' : 'bg-sun-right'}`}
+          style={{ width: `${share * 100}%`, animationDelay: '250ms' }}
+        />
       </div>
     </div>
   );
