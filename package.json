@@ -3,6 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "description": "Which side of the bus or car should you sit on to avoid the sun?",
+  "keywords": [
+    "sun",
+    "shade",
+    "bus",
+    "travel",
+    "solar-position",
+    "routing",
+    "weather",
+    "openstreetmap",
+    "react",
+    "vite"
+  ],
+  "homepage": "https://sun-side.pages.dev",
+  "bugs": "https://github.com/PatelDhruv01/sun-side/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PatelDhruv01/sun-side.git"
+  },
+  "license": "MIT",
+  "author": "Patel Dhruv Vasantkumar",
   "type": "module",
   "engines": {
     "node": ">=22.18"

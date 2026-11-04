@@ -504,8 +504,15 @@ async function resolve(value: PlaceField, near?: LonLat): Promise<Place> {
   return best;
 }
 
-/** Resolves after the browser has painted, so a status shows before heavy work starts. */
-const nextFrame = () => new Promise<void>((done) => requestAnimationFrame(() => setTimeout(done)));
+/**
+ * Resolves after the browser has painted, so a status shows before heavy work starts; and soon
+ * anyway, since a tab in the background doesn't paint and the search would otherwise wait for it.
+ */
+const nextFrame = () =>
+  new Promise<void>((done) => {
+    requestAnimationFrame(() => setTimeout(done));
+    setTimeout(done, 150);
+  });
 
 function friendly(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);

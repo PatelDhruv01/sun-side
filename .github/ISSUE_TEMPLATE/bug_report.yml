@@ -1,0 +1,44 @@
+name: Bug report
+description: Something on the page or the map is broken.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Search Ahmedabad to Himatnagar, tomorrow at 09:00
+        2. Press Play the trip
+        3. ...
+  - type: input
+    id: link
+    attributes:
+      label: Link to the trip, if there is one
+      placeholder: https://sun-side.pages.dev/?from=...
+  - type: input
+    id: device
+    attributes:
+      label: Browser and device
+      placeholder: Chrome on Android, Safari on an iPhone...
+    validations:
+      required: true
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Theme
+      options:
+        - Light
+        - Dark
+        - Not sure
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images in here.

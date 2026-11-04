@@ -1,0 +1,62 @@
+name: Wrong side
+description: Sun Side said one side, but the sun was on the other.
+title: "Wrong side: "
+labels: ["wrong side"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks: reports like this are how the scoring gets tuned. The more exact, the better.
+  - type: input
+    id: link
+    attributes:
+      label: Link to the trip
+      description: Copy it from the address bar (or with Share) on the answer page.
+      placeholder: https://sun-side.pages.dev/?from=...
+    validations:
+      required: true
+  - type: dropdown
+    id: said
+    attributes:
+      label: What Sun Side said
+      options:
+        - Sit on the left
+        - Sit on the right
+        - Either side
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Which side the sun came in on, roughly when, and where on the route.
+      placeholder: The sun came in on the left from about 10:15 to 11:00, after Prantij.
+    validations:
+      required: true
+  - type: dropdown
+    id: vehicle
+    attributes:
+      label: Bus or car
+      options:
+        - Bus
+        - Car
+    validations:
+      required: true
+  - type: dropdown
+    id: road
+    attributes:
+      label: Did it take the road Sun Side showed?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+  - type: input
+    id: weather
+    attributes:
+      label: The weather that day
+      placeholder: Clear, hazy, cloudy...
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The real departure and arrival times if they differ from the link, your seat, photos.
