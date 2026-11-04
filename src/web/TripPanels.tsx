@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { ClockFormat } from '../app/explain.ts';
 import type { RouteResult } from '../app/plan.ts';
+import type { Vehicle } from '../engine/timing.ts';
 import type { Weather } from '../engine/weather.ts';
 import type { Place } from '../services/geocode.ts';
 import type { CandidateRoute } from '../services/routing.ts';
@@ -20,13 +21,14 @@ interface Props {
   /** The chosen route at one departure, or null for the whole day. */
   result: RouteResult | null;
   weather: Weather | null;
+  vehicle: Vehicle;
 }
 
 /**
  * The map and the timeline, sharing one moment of the trip: point at the chart (or play the
  * trip) and the vehicle shows on the map there, with the sun's direction.
  */
-export function TripPanels({ routes, selected, places, clock, onSelect, result, weather }: Props) {
+export function TripPanels({ routes, selected, places, clock, onSelect, result, weather, vehicle }: Props) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const latest = useRef(cursor); // where playback starts from
@@ -83,6 +85,7 @@ export function TripPanels({ routes, selected, places, clock, onSelect, result, 
           clock={clock}
           onSelect={onSelect}
           cursor={result && cursor !== null ? (result.bins[cursor] ?? null) : null}
+          vehicle={vehicle}
         />
       </Suspense>
       {result && (

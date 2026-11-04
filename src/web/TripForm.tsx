@@ -44,6 +44,9 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
   const middle = value.from.place && value.to.place ? lerp(value.from.place.position, value.to.place.position, 0.5) : undefined;
   const ready =
     value.from.text.trim() !== '' && value.to.text.trim() !== '' && value.date !== '' && (value.when === 'day' || value.time !== '');
+  // A bus has a ticket and a road of its own; in a car it's your road.
+  const car = value.vehicle === 'car';
+  const throughTown = car ? 'A town you’ll go through' : 'A town the bus goes through';
   const today = dateInput(Date.now());
   const tomorrow = dateInput(Date.now() + DAY);
   const now = () => {
@@ -94,7 +97,7 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
             icon={<MapPin className="size-4" />}
             field={via}
             near={middle}
-            placeholder="A town the bus goes through"
+            placeholder={throughTown}
             onChange={(field) => set({ vias: value.vias.map((v, j) => (j === i ? field : v)) })}
             action={<LabelButton onClick={() => set({ vias: value.vias.filter((_, j) => j !== i) })}>Remove</LabelButton>}
           />
@@ -117,7 +120,7 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
           className="inline-flex items-center gap-1.5 rounded-lg py-1 text-sm font-medium text-ink-2 hover:text-ink"
         >
           <Plus aria-hidden className="size-4" />
-          Add a town the bus goes through
+          Add {throughTown[0].toLowerCase() + throughTown.slice(1)}
         </button>
       </div>
 
@@ -148,7 +151,7 @@ export function TripForm({ value, onChange, onSubmit, busy, examples, onExample 
               label="Arrives at"
               hint={
                 <>
-                  <span className="@md:hidden">optional, from your ticket</span>
+                  <span className="@md:hidden">{car ? 'optional, if you know it' : 'optional, from your ticket'}</span>
                   <span className="hidden @md:inline">optional</span>
                 </>
               }

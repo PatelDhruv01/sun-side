@@ -6,6 +6,7 @@ import type { ClockFormat } from '../app/explain.ts';
 import { stretches, type SunCategory } from '../app/stretches.ts';
 import { compass } from '../engine/geo.ts';
 import { SUN_THRESHOLD } from '../engine/summary.ts';
+import type { Vehicle } from '../engine/timing.ts';
 import type { LonLat, SegmentPass, TimelineBin } from '../engine/types.ts';
 import type { Place } from '../services/geocode.ts';
 import type { CandidateRoute } from '../services/routing.ts';
@@ -41,20 +42,35 @@ interface Props {
   onSelect: (index: number) => void;
   /** A moment of the trip to show the vehicle at, with the sun's direction: from the timeline or playback. */
   cursor?: TimelineBin | null;
+  vehicle?: Vehicle;
 }
 
-/** The vehicle on the map, nose up, its sunny side's windows lit; and a dot towards the sun. */
-const VEHICLE = `
+/** A dot towards the sun, around the vehicle. */
+const SUN_DOT = `
   <div data-sun class="absolute inset-0 transition-opacity duration-200">
     <span class="absolute top-0 left-1/2 size-3 -translate-x-1/2 rounded-full bg-brand shadow-[0_0_12px_3px_var(--color-brand)]"></span>
     <span class="absolute top-3.5 left-1/2 h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-brand/60"></span>
-  </div>
-  <svg data-vehicle viewBox="0 0 24 32" class="absolute top-1/2 left-1/2 h-8 w-6 -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_2px_4px_rgb(0_0_0/0.35)]">
+  </div>`;
+const SHAPE = 'absolute top-1/2 left-1/2 h-8 w-6 -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_2px_4px_rgb(0_0_0/0.35)]';
+
+/** The vehicle on the map, nose up, its sunny side's windows lit: a long bus, or a car with front and rear windows. */
+const MARKERS: Record<Vehicle, string> = {
+  bus: `${SUN_DOT}
+  <svg data-vehicle viewBox="0 0 24 32" class="${SHAPE}">
     <rect x="4.5" y="2.5" width="15" height="27" rx="5" class="fill-surface stroke-ink" stroke-width="2" />
     <path d="M7.5 7.5 Q12 5 16.5 7.5 L16.5 10 Q12 8 7.5 10 Z" class="fill-ink" opacity="0.5" />
     <rect data-left x="2.5" y="11" width="2.5" height="15" rx="1.2" class="fill-axis" />
     <rect data-right x="19" y="11" width="2.5" height="15" rx="1.2" class="fill-axis" />
-  </svg>`;
+  </svg>`,
+  car: `${SUN_DOT}
+  <svg data-vehicle viewBox="0 0 24 32" class="${SHAPE}">
+    <rect x="5" y="4" width="14" height="24" rx="6.5" class="fill-surface stroke-ink" stroke-width="2" />
+    <path d="M7.5 9.5 Q12 7.5 16.5 9.5 L15.8 12.5 Q12 11.5 8.2 12.5 Z" class="fill-ink" opacity="0.5" />
+    <path d="M8.2 22 Q12 23 15.8 22 L16.4 24.5 Q12 26 7.6 24.5 Z" class="fill-ink" opacity="0.35" />
+    <rect data-left x="3" y="13" width="2.5" height="8" rx="1.2" class="fill-axis" />
+    <rect data-right x="18.5" y="13" width="2.5" height="8" rx="1.2" class="fill-axis" />
+  </svg>`,
+};
 
 const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
   type: 'Feature' as const,
@@ -62,7 +78,7 @@ const line = (coordinates: LonLat[], properties: Record<string, unknown>) => ({
   geometry: { type: 'LineString' as const, coordinates },
 });
 
-export function RouteMap({ routes, selected, passes, places, clock, onSelect, cursor = null }: Props) {
+export function RouteMap({ routes, selected, passes, places, clock, onSelect, cursor = null, vehicle = 'bus' }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
   const marker = useRef<Marker | null>(null);
@@ -111,7 +127,6 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect, cu
     });
     const element = document.createElement('div');
     element.className = 'pointer-events-none size-16'; // MapLibre places it absolutely
-    element.innerHTML = VEHICLE;
     marker.current = new Marker({ element });
     return () => {
       setMap(null);
@@ -130,9 +145,13 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect, cu
       return;
     }
     const element = pin.getElement();
-    const vehicle = element.querySelector<SVGElement>('[data-vehicle]')!;
+    if (element.dataset.kind !== vehicle) {
+      element.innerHTML = MARKERS[vehicle];
+      element.dataset.kind = vehicle;
+    }
+    const shape = element.querySelector<SVGElement>('[data-vehicle]')!;
     const sun = element.querySelector<HTMLElement>('[data-sun]')!;
-    vehicle.style.rotate = `${cursor.heading}deg`;
+    shape.style.rotate = `${cursor.heading}deg`;
     sun.style.rotate = `${cursor.sun.azimuth}deg`;
     sun.style.opacity = cursor.sun.elevation > 0 ? '1' : '0';
     for (const side of ['left', 'right'] as const) {
@@ -140,7 +159,7 @@ export function RouteMap({ routes, selected, passes, places, clock, onSelect, cu
     }
     pin.setLngLat(cursor.position);
     if (!pin.getElement().isConnected) pin.addTo(map);
-  }, [map, cursor]);
+  }, [map, cursor, vehicle]);
 
   // The chosen route coloured by sunny side (or plain, with no time picked), the others in grey, and the places as dots.
   useEffect(() => {

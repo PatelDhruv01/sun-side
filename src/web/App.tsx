@@ -410,6 +410,7 @@ export function App() {
                   onSelect={onMapSelect}
                   result={trip.view.kind === 'at' ? trip.view.results[selected] : null}
                   weather={trip.context.weather}
+                  vehicle={trip.vehicle}
                 />
               </div>
             ) : (

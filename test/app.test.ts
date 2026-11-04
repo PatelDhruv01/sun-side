@@ -76,6 +76,15 @@ test('the route and departure summaries in words', () => {
   assert.equal(departureSummary('either', [{ shift: 30, sit: 'right' }]), 'This departure is near the changeover: leaving 30 min late means sit RIGHT.');
 });
 
+test('a car gets car words: seats rather than rows, and no bus', () => {
+  const morning = simulate(northRoad, { departure: ist('2026-12-15T09:00') }).bins;
+  const windscreen = { ...decide(morning), avoidRows: 'front' as const };
+  const rows = (vehicle?: 'bus' | 'car') => explain(windscreen, summarise(morning), clock, undefined, vehicle).tips.find((tip) => tip.kind === 'rows')?.text;
+  assert.equal(rows(), 'Tip: a lot of sun comes through the windscreen, so avoid the front rows.');
+  assert.equal(rows('car'), 'Tip: a lot of sun comes through the windscreen, so the back seats are shadier.');
+  assert.equal(routesSummary(['left'], false, { ...HINTS, other: 'you go another way' }), 'Only one route found. If you go another way, pin it.');
+});
+
 test('stretches follow the sunny side, and rows cover the whole trip', () => {
   const night = simulate(northRoad, { departure: ist('2026-12-15T21:00') });
   const dark = stretches(northRoad, night.passes);

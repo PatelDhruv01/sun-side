@@ -30,7 +30,8 @@ export function TripBar({ places, summary, facts, editing, onEdit, onReturn, onS
   return (
     <div className={`${CARD} animate-rise p-2`}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-3 pt-2 pb-3 sm:px-4">
-        <div className="min-w-0 flex-1">
+        {/* at least 16rem wide, so on a phone the buttons move under the trip instead of squeezing it */}
+        <div className="min-w-0 flex-[1_1_16rem]">
           <p className="flex flex-wrap items-center gap-x-2 text-lg font-semibold tracking-tight sm:text-xl">
             <span title={from.label}>{short(from)}</span>
             <ArrowRight aria-label="to" className="size-4 text-muted" />

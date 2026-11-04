@@ -3,6 +3,7 @@ import { otherSide, type Decision, type SeatSide } from '../engine/decide.ts';
 import { agreement, type Shifted } from '../engine/evaluate.ts';
 import type { TripStats } from '../engine/summary.ts';
 import type { Band } from '../engine/sweep.ts';
+import type { Vehicle } from '../engine/timing.ts';
 import type { TripWeather } from '../engine/weather.ts';
 
 /** Shows a clock time (ms since epoch) the way the reader expects, e.g. "09:00" or "06:10 +1". */
@@ -25,7 +26,7 @@ export interface Tip {
 /** Below this, in °C all the way, some people would rather sit in the sun. */
 const COOL = 18;
 
-export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weather?: TripWeather): Explanation {
+export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weather?: TripWeather, vehicle: Vehicle = 'bus'): Explanation {
   const reasons: string[] = [];
   const bothSides = () => `${capitalise(sunStory('left', stats, clock))}; ${sunStory('right', stats, clock)}.`;
   let headline: string;
@@ -81,7 +82,15 @@ export function explain(d: Decision, stats: TripStats, clock: ClockFormat, weath
     });
   }
   if (d.avoidRows) {
-    const where = d.avoidRows === 'front' ? 'windscreen, so avoid the front rows' : 'rear window, so avoid the back rows';
+    // A bus has rows to pick from; a car has front seats and back seats.
+    const where =
+      vehicle === 'car'
+        ? d.avoidRows === 'front'
+          ? 'windscreen, so the back seats are shadier'
+          : 'rear window, so the front seats are shadier'
+        : d.avoidRows === 'front'
+          ? 'windscreen, so avoid the front rows'
+          : 'rear window, so avoid the back rows';
     tips.push({ kind: 'rows', text: `Tip: a lot of sun comes through the ${where}.` });
   }
   if (weather && d.sit !== 'either' && weather.maxTemperature < COOL) {
@@ -149,11 +158,15 @@ export const verdictLabel = (sit: Decision['sit'], confidence?: Decision['confid
 export interface RouteHints {
   pin: string;
   pick: string;
+  /** That the trip might take another road, e.g. "you go another way"; "your bus goes another way" when not given. */
+  other?: string;
 }
 
 /** Whether the routes found agree, in a sentence. `pinned` means the reader fixed the route with via towns. */
 export function routesSummary(sits: Decision['sit'][], pinned: boolean, hints: RouteHints): string {
-  if (sits.length <= 1) return pinned ? 'Route pinned through your via towns.' : `Only one route found. If your bus goes another way, ${hints.pin}.`;
+  if (sits.length <= 1) {
+    return pinned ? 'Route pinned through your via towns.' : `Only one route found. If ${hints.other ?? 'your bus goes another way'}, ${hints.pin}.`;
+  }
   const verdicts = agreement(sits);
   if (verdicts === 'agree') return 'All routes agree.';
   if (verdicts === 'mostly') return 'The routes broadly agree; on some it hardly matters.';

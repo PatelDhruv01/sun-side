@@ -1,17 +1,27 @@
 import { Armchair, ArrowLeft, Check, CircleCheck, Clock, CloudSun, Eye, Gauge, Info, Moon, Repeat2, Route, Scale, Thermometer, type LucideIcon } from 'lucide-react';
 import { useMemo, type ReactNode } from 'react';
-import { departureSummary, explain, routesSummary, weatherSentence, type ClockFormat, type Tip } from '../app/explain.ts';
+import { departureSummary, explain, routesSummary, weatherSentence, type ClockFormat, type RouteHints, type Tip } from '../app/explain.ts';
 import { departureShifts, type RouteResult, type TripContext } from '../app/plan.ts';
 import { otherSide, type Decision, type SeatSide, type SeatSwitch } from '../engine/decide.ts';
 import type { TripStats } from '../engine/summary.ts';
-import type { Timing } from '../engine/timing.ts';
+import type { Timing, Vehicle } from '../engine/timing.ts';
 import { tripWeather } from '../engine/weather.ts';
 import { BusSeatMap } from './BusSeatMap.tsx';
+import { CarSeatMap } from './CarSeatMap.tsx';
 import { dayLabel, shortDuration } from './time.ts';
 import { CARD, CountUp, Pill, stagger } from './ui.tsx';
 
-/** How the page tells you to pin or pick a route. */
-const HINTS = { pin: 'add a town it goes through', pick: 'pick the one your bus takes below' };
+/** How the page tells you to pin or pick a route, for a bus or a car. */
+const HINTS: Record<Vehicle, RouteHints> = {
+  bus: { pin: 'add a town it goes through', pick: 'pick the one your bus takes below' },
+  car: { pin: 'add a town you’ll go through', pick: 'pick the one you’ll take below', other: 'you go another way' },
+};
+
+/** In a car the driver can't move, so which seats "the left" and "the right" leave. */
+const CAR_SEATS: Record<SeatSide, string> = {
+  left: 'That’s the front passenger seat, or the back seat behind it.',
+  right: 'That’s the back seat behind the driver.',
+};
 
 const TIP_ICONS: Record<Tip['kind'], LucideIcon> = { glare: Eye, switch: Repeat2, rows: Armchair, cool: Thermometer };
 
@@ -30,14 +40,18 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
   const result = results[selected];
   const { decision, stats, stretch } = result;
   const weather = useMemo(() => (context.weather ? tripWeather(context.weather, result.bins) : undefined), [context, result]);
-  const { headline, reasons, tips, heat } = explain(decision, stats, clock, weather);
+  const { headline, reasons, tips, heat } = explain(decision, stats, clock, weather, timing.vehicle);
+  const car = timing.vehicle === 'car';
+  const SeatMap = car ? CarSeatMap : BusSeatMap;
   const shifts = useMemo(() => departureShifts(context, result, timing), [context, result, timing]);
   const either = decision.sit === 'either';
   const end = timing.departure + stats.minutes * 60_000;
   const confidence = confidenceOf(decision, stats);
   const basis =
     stretch.basis === 'ticket'
-      ? "Times are fitted to your ticket's arrival time."
+      ? car
+        ? 'Times are fitted to your arrival time.'
+        : "Times are fitted to your ticket's arrival time."
       : `Times assume a typical ${timing.vehicle} trip, ${stretch.scale}× free-flowing traffic; add your arrival time for a closer answer.`;
 
   return (
@@ -65,9 +79,14 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
         <p className="mt-2 animate-rise text-sm text-ink-2" style={stagger(2)}>
           {dayLabel(timing.departure)} · {clock(timing.departure)} → {clock(end)} · {shortDuration(stats.minutes)}
         </p>
+        {car && !either && (
+          <p className="mt-1 animate-rise text-sm font-medium text-ink" style={stagger(2)}>
+            {CAR_SEATS[decision.sit as SeatSide]}
+          </p>
+        )}
 
         <div className="mt-5 grid animate-rise grid-cols-[auto_minmax(0,1fr)] items-center gap-4" style={stagger(3)}>
-          <BusSeatMap
+          <SeatMap
             sit={decision.sit}
             sunny={either ? undefined : otherSide(decision.sit as SeatSide)}
             avoidRows={decision.avoidRows}
@@ -115,7 +134,7 @@ export function Verdict({ context, results, selected, timing, clock, pinned, onB
       )}
 
       <div className="space-y-2 border-t border-hairline bg-raised/60 px-5 py-4 text-sm text-ink-2 sm:px-6">
-        <CheckLine icon={Route}>{routesSummary(results.map((r) => r.decision.sit), pinned, HINTS)}</CheckLine>
+        <CheckLine icon={Route}>{routesSummary(results.map((r) => r.decision.sit), pinned, HINTS[timing.vehicle])}</CheckLine>
         <CheckLine icon={Clock}>{departureSummary(decision.sit, shifts)}</CheckLine>
         {context.notes.map((note) => (
           <CheckLine key={note} icon={Info}>
